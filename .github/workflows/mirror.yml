@@ -1,0 +1,31 @@
+name: Mirror to Vercel Repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout org repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.ORG_PAT }}
+
+      - name: Set git identity to techentia-work
+        run: |
+          git config --global user.name "techentia-work"
+          git config --global user.email "work@techentia.in"
+
+      - name: Force push to veedra
+        run: |
+          rm -rf .git
+          git init
+          git add .
+          git reset .github/workflows  # Remove workflows from staging
+          git commit -m "Mirror update from org repo"
+          git branch -M main
+          git remote add origin https://techentia-work:${{ secrets.DEPLOY_PAT }}@github.com/techentia-work/veedra.git
+          git push origin main --force
