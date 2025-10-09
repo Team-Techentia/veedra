@@ -6,7 +6,8 @@ const {
   createCategory,
   updateCategory,
   deleteCategory,
-  getCategoryTree
+  getCategoryTree,
+  getSubcategories
 } = require('../controllers/categoryController');
 
 const router = express.Router();
@@ -18,6 +19,7 @@ router.use(protect);
 router.get('/', getCategories);
 router.get('/tree', getCategoryTree);
 router.get('/:id', getCategory);
+router.get('/:parentId/subcategories', getSubcategories);
 
 // Manager/Owner only routes
 router.post('/', isManagerOrOwner, createCategory);

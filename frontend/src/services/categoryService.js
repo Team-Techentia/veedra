@@ -13,6 +13,12 @@ const categoryService = {
     return response.data
   },
 
+  // Get subcategories by parent category
+  getSubcategories: async (parentId) => {
+    const response = await api.get(`/categories/${parentId}/subcategories`)
+    return response.data
+  },
+
   // Get category by ID
   getCategory: async (id) => {
     const response = await api.get(`/categories/${id}`)

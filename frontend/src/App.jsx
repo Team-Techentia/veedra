@@ -21,9 +21,10 @@ import AddProductPage from './pages/products/AddProductPage'
 import EditProductPage from './pages/products/EditProductPage'
 import CategoriesPage from './pages/products/CategoriesPage'
 import VendorsPage from './pages/vendors/VendorsPage'
+import AddVendorPage from './pages/vendors/AddVendorPage'
 
 // Combo Management
-import CombosPage from './pages/combos/CombosPage'
+import CombosPage from './pages/combos/NewCombosPage'
 import CreateComboPage from './pages/combos/CreateComboPage'
 import EditComboPage from './pages/combos/EditComboPage'
 
@@ -119,6 +120,16 @@ function App() {
           <Route path="vendors" element={
             <ProtectedRoute allowedRoles={['owner', 'manager']}>
               <VendorsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="vendors/add" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager']}>
+              <AddVendorPage />
+            </ProtectedRoute>
+          } />
+          <Route path="vendors/edit/:id" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager']}>
+              <AddVendorPage />
             </ProtectedRoute>
           } />
           

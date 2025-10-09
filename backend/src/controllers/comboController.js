@@ -1,100 +1,38 @@
+const mongoose = require('mongoose');
 const Combo = require('../models/Combo');
-const Product = require('../models/Product');
-const { validationResult } = require('express-validator');
 
-// @desc    Get all combos with filtering and pagination
-// @route   GET /api/combos
-// @access  Private
+// Get all combos
 const getCombos = async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 10,
-      status,
-      search,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-      priceRange,
-      slotFilter
-    } = req.query;
+    const combos = await Combo.find().sort({ createdAt: -1 });
 
-    // Build query
-    let query = {};
-    
-    if (status) {
-      query.isActive = status === 'active';
-    }
-    
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { code: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
-    }
-    
-    if (priceRange) {
-      const [min, max] = priceRange.split('-').map(Number);
-      query['priceSlots.minPrice'] = { $lte: max };
-      query['priceSlots.maxPrice'] = { $gte: min };
-    }
-    
-    if (slotFilter) {
-      query['priceSlots.name'] = { $regex: slotFilter, $options: 'i' };
-    }
-
-    // Execute query with pagination
-    const combos = await Combo.find(query)
-      .populate('eligibleCategories', 'name code')
-      .populate('eligibleVendors', 'name code')
-      .populate('applicableProducts', 'name code pricing.sellingPrice')
-      .populate('excludedProducts', 'name code sellingPrice')
-      .populate('createdBy', 'name email')
-      .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .lean();
-
-    const total = await Combo.countDocuments(query);
-
-    // Calculate combo statistics
-    const stats = await Combo.getComboStats();
-
-    res.status(200).json({
+    res.json({
       success: true,
-      data: combos,
-      pagination: {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        limit
-      },
-      stats: stats[0] || {
-        totalCombos: 0,
-        activeCombos: 0,
-        totalSlots: 0,
-        averageDiscount: 0
-      }
+      data: combos
     });
   } catch (error) {
-    console.error('Get combos error:', error);
+    console.error('Error fetching combos:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching combos',
+      message: 'Failed to fetch combos',
       error: error.message
     });
   }
 };
 
-// @desc    Get single combo by ID
-// @route   GET /api/combos/:id
-// @access  Private
+// Get single combo
 const getCombo = async (req, res) => {
   try {
-    const combo = await Combo.findById(req.params.id)
-      .populate('applicableProducts', 'name code pricing.sellingPrice category vendor')
-      .populate('createdBy', 'firstName lastName')
-      .populate('lastModifiedBy', 'firstName lastName');
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid combo ID'
+      });
+    }
+
+    const combo = await Combo.findById(id);
 
     if (!combo) {
       return res.status(404).json({
@@ -103,238 +41,85 @@ const getCombo = async (req, res) => {
       });
     }
 
-    // Get basic analytics from combo model
-    const analytics = {
-      totalUsage: combo.usageLimits?.usageCount || 0,
-      totalRevenue: combo.analytics?.totalRevenue || 0,
-      totalSavings: combo.analytics?.totalSavings || 0,
-      averageOrderValue: combo.analytics?.averageOrderValue || 0
-    };
-
-    res.status(200).json({
+    res.json({
       success: true,
-      data: {
-        ...combo.toJSON(),
-        analytics
-      }
+      data: combo
     });
   } catch (error) {
-    console.error('Get combo error:', error);
+    console.error('Error fetching combo:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while fetching combo',
+      message: 'Failed to fetch combo',
       error: error.message
     });
   }
 };
 
-// @desc    Create new combo
-// @route   POST /api/combos
-// @access  Private (Manager/Owner)
+// Create combo
 const createCombo = async (req, res) => {
   try {
-    // Validate request
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation errors',
-        errors: errors.array()
-      });
-    }
+    const comboData = { 
+      ...req.body,
+      createdAt: new Date()
+    };
 
-    const {
-      name,
-      description,
-      priceSlots,
-      discountType,
-      discountValue,
-      applicableProducts,
-      validFrom,
-      validTo,
-      usageLimit,
-      isActive
-    } = req.body;
-
-    // Validate price slots
-    if (!priceSlots || priceSlots.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'At least one price slot is required'
-      });
-    }
-
-    // Check for overlapping price ranges
-    for (let i = 0; i < priceSlots.length; i++) {
-      for (let j = i + 1; j < priceSlots.length; j++) {
-        const slot1 = priceSlots[i];
-        const slot2 = priceSlots[j];
-        
-        if (!(slot1.maxPrice < slot2.minPrice || slot2.maxPrice < slot1.minPrice)) {
-          return res.status(400).json({
-            success: false,
-            message: `Price slots "${slot1.slotName || slot1.name}" and "${slot2.slotName || slot2.name}" have overlapping ranges`
-          });
-        }
-      }
-    }
-
-    // Validate applicable products exist
-    if (applicableProducts && applicableProducts.length > 0) {
-      const existingProducts = await Product.find({
-        _id: { $in: applicableProducts },
-        isActive: true,
-        isComboEligible: true
-      });
-
-      if (existingProducts.length !== applicableProducts.length) {
-        return res.status(400).json({
-          success: false,
-          message: 'One or more selected products are not available or not combo eligible'
-        });
-      }
-    }
-
-    // Create combo
-    const combo = new Combo({
-      name,
-      description,
-      priceSlots: priceSlots.map(slot => ({
-        ...slot,
-        currentItems: 0,
-        totalValue: 0
-      })),
-      discountType,
-      discountValue,
-      applicableProducts: applicableProducts || [],
-      validFrom: validFrom || new Date(),
-      validTo,
-      usageLimit,
-      isActive: isActive !== false,
-      createdBy: req.user.id,
-      lastModifiedBy: req.user.id
-    });
-
+    const combo = new Combo(comboData);
     await combo.save();
-
-    // Populate the created combo
-    const populatedCombo = await Combo.findById(combo._id)
-      .populate('applicableProducts', 'name code pricing.sellingPrice')
-      .populate('createdBy', 'firstName lastName');
 
     res.status(201).json({
       success: true,
-      message: 'Combo created successfully',
-      data: populatedCombo
+      data: combo,
+      message: 'Combo created successfully'
     });
   } catch (error) {
-    console.error('Create combo error:', error);
+    console.error('Error creating combo:', error);
     
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    // Handle duplicate key error
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: 'A combo with this name or code already exists'
+        message: 'Combo SKU already exists'
       });
     }
 
     res.status(500).json({
       success: false,
-      message: 'Server error while creating combo',
+      message: 'Failed to create combo',
       error: error.message
     });
   }
 };
 
-// @desc    Update combo
-// @route   PUT /api/combos/:id
-// @access  Private (Manager/Owner)
+// Update combo
 const updateCombo = async (req, res) => {
   try {
-    const combo = await Combo.findById(req.params.id);
-    
-    if (!combo) {
-      return res.status(404).json({
-        success: false,
-        message: 'Combo not found'
-      });
-    }
+    const { id } = req.params;
 
-    // Validate request
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: 'Validation errors',
-        errors: errors.array()
+        message: 'Invalid combo ID'
       });
     }
 
     const updateData = { ...req.body };
-    updateData.lastModifiedBy = req.user.id;
 
-    // If updating price slots, validate them
-    if (updateData.priceSlots) {
-      // Check for overlapping price ranges
-      for (let i = 0; i < updateData.priceSlots.length; i++) {
-        for (let j = i + 1; j < updateData.priceSlots.length; j++) {
-          const slot1 = updateData.priceSlots[i];
-          const slot2 = updateData.priceSlots[j];
-          
-          if (!(slot1.maxPrice < slot2.minPrice || slot2.maxPrice < slot1.minPrice)) {
-            return res.status(400).json({
-              success: false,
-              message: `Price slots "${slot1.name}" and "${slot2.name}" have overlapping ranges`
-            });
-          }
-        }
-      }
-    }
-
-    // If updating applicable products, validate them
-    if (updateData.applicableProducts) {
-      const existingProducts = await Product.find({
-        _id: { $in: updateData.applicableProducts },
-        isActive: true,
-        isComboEligible: true
-      });
-
-      if (existingProducts.length !== updateData.applicableProducts.length) {
-        return res.status(400).json({
-          success: false,
-          message: 'One or more selected products are not available or not combo eligible'
-        });
-      }
-    }
-
-    const updatedCombo = await Combo.findByIdAndUpdate(
-      req.params.id,
+    const combo = await Combo.findByIdAndUpdate(
+      id,
       updateData,
       { new: true, runValidators: true }
-    ).populate('applicableProducts', 'name code pricing.sellingPrice')
-     .populate('lastModifiedBy', 'firstName lastName');
+    );
 
-    res.status(200).json({
-      success: true,
-      message: 'Combo updated successfully',
-      data: updatedCombo
-    });
-  } catch (error) {
-    console.error('Update combo error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while updating combo',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Delete combo
-// @route   DELETE /api/combos/:id
-// @access  Private (Manager/Owner)
-const deleteCombo = async (req, res) => {
-  try {
-    const combo = await Combo.findById(req.params.id);
-    
     if (!combo) {
       return res.status(404).json({
         success: false,
@@ -342,216 +127,114 @@ const deleteCombo = async (req, res) => {
       });
     }
 
-    // Check if combo is currently being used
-    const isInUse = combo.currentUsage > 0;
+    res.json({
+      success: true,
+      data: combo,
+      message: 'Combo updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating combo:', error);
     
-    if (isInUse && req.query.force !== 'true') {
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete combo that is currently in use. Use force=true to override.',
-        currentUsage: combo.currentUsage
+        message: 'Validation failed',
+        errors: validationErrors
       });
     }
 
-    await Combo.findByIdAndDelete(req.params.id);
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Combo SKU already exists'
+      });
+    }
 
-    res.status(200).json({
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update combo',
+      error: error.message
+    });
+  }
+};
+
+// Delete combo
+const deleteCombo = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid combo ID'
+      });
+    }
+
+    const combo = await Combo.findByIdAndDelete(id);
+
+    if (!combo) {
+      return res.status(404).json({
+        success: false,
+        message: 'Combo not found'
+      });
+    }
+
+    res.json({
       success: true,
       message: 'Combo deleted successfully'
     });
   } catch (error) {
-    console.error('Delete combo error:', error);
+    console.error('Error deleting combo:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while deleting combo',
+      message: 'Failed to delete combo',
       error: error.message
     });
   }
 };
 
-// @desc    Find suitable combo for products
-// @route   POST /api/combos/find-suitable
-// @access  Private
-const findSuitableCombo = async (req, res) => {
+// Get active combos
+const getActiveCombos = async (req, res) => {
   try {
-    const { products } = req.body; // Array of { productId, quantity, price }
-    
-    if (!products || products.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Products array is required'
-      });
-    }
+    const activeCombos = await Combo.getActiveCombos();
 
-    // Get all active combos
-    const combos = await Combo.find({
-      isActive: true,
-      $expr: {
-        $or: [
-          { $eq: ['$validTo', null] },
-          { $gte: ['$validTo', new Date()] }
-        ]
-      },
-      $expr: {
-        $lte: ['$validFrom', new Date()]
-      }
-    }).populate('applicableProducts');
-
-    const suitableCombos = [];
-
-    for (const combo of combos) {
-      if (!combo.isCurrentlyValid()) continue;
-
-      const assignment = combo.findBestProductAssignment(products);
-      
-      if (assignment.canAssign && assignment.totalSavings > 0) {
-        suitableCombos.push({
-          combo: combo,
-          assignment: assignment,
-          savings: assignment.totalSavings,
-          efficiency: assignment.totalSavings / assignment.totalValue
-        });
-      }
-    }
-
-    // Sort by savings (descending)
-    suitableCombos.sort((a, b) => b.savings - a.savings);
-
-    res.status(200).json({
+    res.json({
       success: true,
-      data: suitableCombos.slice(0, 5), // Return top 5 suitable combos
-      message: `Found ${suitableCombos.length} suitable combo(s)`
+      data: activeCombos
     });
   } catch (error) {
-    console.error('Find suitable combo error:', error);
+    console.error('Error fetching active combos:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while finding suitable combos',
+      message: 'Failed to fetch active combos',
       error: error.message
     });
   }
 };
 
-// @desc    Apply combo to products
-// @route   POST /api/combos/:id/apply
-// @access  Private
-const applyCombo = async (req, res) => {
+// Validate combo for products
+const validateComboForProducts = async (req, res) => {
   try {
-    const { products, autoAssign = true } = req.body;
-    
-    const combo = await Combo.findById(req.params.id);
-    
-    if (!combo) {
-      return res.status(404).json({
-        success: false,
-        message: 'Combo not found'
-      });
-    }
+    const { comboId, productIds } = req.body;
 
-    if (!combo.isCurrentlyValid()) {
+    if (!mongoose.Types.ObjectId.isValid(comboId)) {
       return res.status(400).json({
         success: false,
-        message: 'Combo is not currently valid',
-        validFrom: combo.validFrom,
-        validTo: combo.validTo
+        message: 'Invalid combo ID'
       });
     }
 
-    let assignment;
-    
-    if (autoAssign) {
-      // Auto-assign products to best slots
-      assignment = combo.findBestProductAssignment(products);
-    } else {
-      // Manual assignment provided
-      assignment = combo.validateProductAssignment(products);
-    }
-
-    if (!assignment.canAssign) {
+    if (!Array.isArray(productIds) || productIds.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot apply combo to these products',
-        reasons: assignment.reasons
+        message: 'Product IDs are required'
       });
     }
 
-    // Update combo usage
-    combo.currentUsage += 1;
-    combo.totalSaved += assignment.totalSavings;
-    
-    // Update slot statistics
-    assignment.slotAssignments.forEach(slotAssignment => {
-      const slot = combo.priceSlots.find(s => s.name === slotAssignment.slotName);
-      if (slot) {
-        slot.currentItems += slotAssignment.products.length;
-        slot.totalValue += slotAssignment.totalValue;
-      }
-    });
-
-    await combo.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Combo applied successfully',
-      data: {
-        combo: combo,
-        assignment: assignment,
-        totalSavings: assignment.totalSavings,
-        finalTotal: assignment.totalValue - assignment.totalSavings
-      }
-    });
-  } catch (error) {
-    console.error('Apply combo error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while applying combo',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Toggle combo status
-// @route   PATCH /api/combos/:id/toggle
-// @access  Private (Manager/Owner)
-const toggleComboStatus = async (req, res) => {
-  try {
-    const combo = await Combo.findById(req.params.id);
-    
-    if (!combo) {
-      return res.status(404).json({
-        success: false,
-        message: 'Combo not found'
-      });
-    }
-
-    combo.isActive = !combo.isActive;
-    combo.lastModifiedBy = req.user.id;
-    await combo.save();
-
-    res.status(200).json({
-      success: true,
-      message: `Combo ${combo.isActive ? 'activated' : 'deactivated'} successfully`,
-      data: combo
-    });
-  } catch (error) {
-    console.error('Toggle combo status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while toggling combo status',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Validate combo slot assignment
-// @route   POST /api/combos/validate-slot
-// @access  Private
-const validateComboSlot = async (req, res) => {
-  try {
-    const { comboId, products } = req.body;
-    
     const combo = await Combo.findById(comboId);
-    
     if (!combo) {
       return res.status(404).json({
         success: false,
@@ -559,25 +242,58 @@ const validateComboSlot = async (req, res) => {
       });
     }
 
-    if (!combo.isCurrentlyValid()) {
+    // Check if combo is currently valid
+    const status = combo.getStatus();
+    if (status !== 'active') {
       return res.status(400).json({
         success: false,
-        message: 'Combo is not currently valid'
+        message: `Combo is ${status}, not active`
       });
     }
 
-    const validation = combo.validateProductAssignment(products);
-
-    res.status(200).json({
+    res.json({
       success: true,
-      data: validation,
-      message: validation.canAssign ? 'Assignment is valid' : 'Assignment has issues'
+      message: 'Combo validation successful',
+      data: {
+        combo,
+        isValid: true
+      }
     });
   } catch (error) {
-    console.error('Validate combo slot error:', error);
+    console.error('Error validating combo:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error while validating combo slot',
+      message: 'Failed to validate combo',
+      error: error.message
+    });
+  }
+};
+
+// Get combo statistics
+const getComboStats = async (req, res) => {
+  try {
+    const totalCombos = await Combo.countDocuments();
+    const activeCombos = await Combo.countDocuments({ paused: false });
+    const pausedCombos = await Combo.countDocuments({ paused: true });
+    
+    const stats = {
+      totalCombos,
+      activeCombos,
+      pausedCombos,
+      totalRevenue: 0, // Would need to calculate from billing data
+      totalSavings: 0, // Would need to calculate from billing data
+      avgOrderValue: 0 // Would need to calculate from billing data
+    };
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('Error fetching combo stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch combo statistics',
       error: error.message
     });
   }
@@ -589,8 +305,7 @@ module.exports = {
   createCombo,
   updateCombo,
   deleteCombo,
-  findSuitableCombo,
-  applyCombo,
-  toggleComboStatus,
-  validateComboSlot
+  getActiveCombos,
+  validateComboForProducts,
+  getComboStats
 };

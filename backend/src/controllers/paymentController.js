@@ -47,29 +47,54 @@ const processPayment = async (req, res) => {
     const billNumber = `BILL${Date.now()}`;
     const transactionId = `TXN${Date.now()}`;
 
-    // Create billing record
+    // Create billing record with enhanced structure
     const billingData = {
       billNumber,
+      billType: combos.length > 0 ? 'combo' : 'normal',
       customer: customerInfo || {},
       items: cartItems.map(item => ({
         product: item._id,
         productName: item.name,
         productCode: item.productCode || item.code,
+        barcode: item.barcode,
+        hsnCode: item.hsnCode,
         quantity: item.quantity,
-        unitPrice: item.price,
-        totalPrice: item.price * item.quantity
+        unit: 'piece',
+        unitPrice: item.price, // This is the discounted price
+        mrp: item.mrp || item.offerPrice || item.price,
+        discount: Math.max(0, (item.offerPrice || item.price) - item.price), // Discount from offer to discounted price
+        taxRate: item.gstRate || 18,
+        taxAmount: (item.price * item.quantity) * ((item.gstRate || 18) / 100),
+        totalAmount: item.price * item.quantity
       })),
-      subtotal,
-      tax: taxAmount,
-      discount: comboDiscount,
-      totalAmount: totalAmount,
-      paymentMethod,
-      paymentStatus: 'completed',
-      billingStaff: req.user.id,
+      totals: {
+        subtotal,
+        totalDiscount: 0, // Will be calculated in pre-save
+        comboSavings: comboDiscount,
+        taxableAmount: subtotal - comboDiscount,
+        totalTax: taxAmount,
+        grandTotal: totalAmount,
+        roundOff: 0,
+        finalAmount: totalAmount
+      },
+      payment: {
+        method: paymentMethod,
+        status: 'paid',
+        amountReceived: receivedAmount || totalAmount,
+        changeGiven: Math.max(0, (receivedAmount || totalAmount) - totalAmount),
+        transactionId
+      },
+      billedBy: req.user.id,
+      billerName: `${req.user.firstName} ${req.user.lastName}`,
       appliedCombos: combos.map(combo => ({
-        comboId: combo.comboId,
+        combo: combo.comboId,
         comboName: combo.comboName,
-        discountAmount: combo.discount
+        comboCode: `COMBO-${combo.comboId}`,
+        originalAmount: subtotal,
+        discountAmount: combo.discount,
+        finalAmount: subtotal - combo.discount,
+        savingsAmount: combo.discount,
+        itemsCount: cartItems.length
       }))
     };
 
@@ -94,16 +119,26 @@ const processPayment = async (req, res) => {
     const payment = new Payment(paymentData);
     await payment.save();
 
-    // Update product stock
+    // Update product stock and sales statistics
     for (const item of cartItems) {
       try {
-        await Product.findByIdAndUpdate(
+        const updateResult = await Product.findByIdAndUpdate(
           item._id,
           { 
-            $inc: { 'inventory.currentStock': -item.quantity },
+            $inc: { 
+              'inventory.currentStock': -item.quantity,
+              'totalSold': item.quantity,
+              'totalRevenue': item.price * item.quantity
+            },
             $set: { 'inventory.lastUpdated': new Date() }
-          }
+          },
+          { new: true }
         );
+
+        // Check if stock is low and log warning
+        if (updateResult && updateResult.inventory.currentStock <= updateResult.inventory.reorderPoint) {
+          console.warn(`Low stock alert: Product ${updateResult.name} (${updateResult.code}) has ${updateResult.inventory.currentStock} units left`);
+        }
       } catch (stockError) {
         console.error(`Error updating stock for product ${item._id}:`, stockError);
       }

@@ -26,6 +26,24 @@ const getCategoryTree = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Get subcategories by parent category
+// @route   GET /api/categories/:parentId/subcategories
+// @access  Private
+const getSubcategories = asyncHandler(async (req, res) => {
+  const { parentId } = req.params;
+  
+  const subcategories = await Category.find({ 
+    parent: parentId, 
+    isActive: true 
+  }).sort({ sortOrder: 1, name: 1 });
+  
+  res.json({
+    status: 'success',
+    count: subcategories.length,
+    data: subcategories
+  });
+});
+
 // @desc    Get single category
 // @route   GET /api/categories/:id
 // @access  Private
@@ -125,6 +143,7 @@ const deleteCategory = asyncHandler(async (req, res) => {
 module.exports = {
   getCategories,
   getCategoryTree,
+  getSubcategories,
   getCategory,
   createCategory,
   updateCategory,

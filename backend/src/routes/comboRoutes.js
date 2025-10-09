@@ -6,8 +6,9 @@ const {
   createCombo,
   updateCombo,
   deleteCombo,
-  toggleComboStatus,
-  validateComboSlot
+  getActiveCombos,
+  validateComboForProducts,
+  getComboStats
 } = require('../controllers/comboController');
 
 const router = express.Router();
@@ -17,13 +18,14 @@ router.use(protect);
 
 // Public routes (all authenticated users)
 router.get('/', getCombos);
+router.get('/active', getActiveCombos);
+router.get('/stats', getComboStats);
 router.get('/:id', getCombo);
-router.post('/validate-slot', canAccessBilling, validateComboSlot);
+router.post('/validate', canAccessBilling, validateComboForProducts);
 
 // Manager/Owner only routes
 router.post('/', isManagerOrOwner, createCombo);
 router.put('/:id', isManagerOrOwner, updateCombo);
-router.put('/:id/toggle-status', isManagerOrOwner, toggleComboStatus);
 router.delete('/:id', isManagerOrOwner, deleteCombo);
 
 module.exports = router;

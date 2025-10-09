@@ -43,6 +43,13 @@ const POSBillingPage = () => {
     }
   }, []);
 
+  // Watch for cart changes to validate combo
+  useEffect(() => {
+    if (selectedCombo && cart.length > 0) {
+      validateComboAfterCartChange();
+    }
+  }, [cart.length]); // Only trigger on cart length changes
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -65,18 +72,42 @@ const POSBillingPage = () => {
   const handleBarcodeInput = async (e) => {
     if (e.key === 'Enter' && barcodeInput.trim()) {
       e.preventDefault();
-      const product = products.find(p => 
-        p.barcode === barcodeInput.trim() || 
-        p.productCode === barcodeInput.trim()
-      );
       
-      if (product) {
-        addToCart(product);
-        setBarcodeInput('');
-      } else {
-        toast.error('Product not found!');
-        setBarcodeInput('');
+      try {
+        // First try to find in loaded products
+        let product = products.find(p => 
+          p.barcode === barcodeInput.trim() || 
+          p.code === barcodeInput.trim() ||
+          p.productCode === barcodeInput.trim()
+        );
+        
+        // If not found locally, try scanning via API
+        if (!product) {
+          try {
+            const scannedResult = await productService.scanProductByBarcode(barcodeInput.trim());
+            product = scannedResult.data;
+          } catch (scanError) {
+            console.error('Barcode scan error:', scanError);
+          }
+        }
+        
+        if (product) {
+          // Check if product has stock
+          if ((product.inventory?.currentStock || 0) <= 0) {
+            toast.error('Product is out of stock!');
+          } else {
+            addToCart(product);
+            toast.success(`Added ${product.name} to cart`);
+          }
+        } else {
+          toast.error('Product not found with this barcode!');
+        }
+      } catch (error) {
+        console.error('Error processing barcode:', error);
+        toast.error('Failed to process barcode');
       }
+      
+      setBarcodeInput('');
     }
   };
 
@@ -117,7 +148,11 @@ const POSBillingPage = () => {
       setCart([...cart, {
         ...product,
         quantity: 1,
-        price: product.pricing?.sellingPrice || 0
+        price: product.pricing?.offerPrice || 0, // Default to offer price
+        offerPrice: product.pricing?.offerPrice || 0,
+        discountedPrice: product.pricing?.discountedPrice || 0,
+        mrp: product.pricing?.mrp || 0,
+        isComboApplied: false // Track if this item has combo applied
       }]);
     }
   };
@@ -139,10 +174,94 @@ const POSBillingPage = () => {
         ? { ...item, quantity: newQuantity }
         : item
     ));
+    
+    // Check if combo is still valid after quantity change
+    validateComboAfterCartChange();
   };
 
   const removeFromCart = (productId) => {
     setCart(cart.filter(item => item._id !== productId));
+    // Check if combo is still valid after removing item
+    validateComboAfterCartChange();
+  };
+
+  // Update cart pricing based on combo application
+  const updateCartPricing = (comboApplied = false) => {
+    if (!comboApplied) {
+      // No combo - all items at offer price
+      setCart(prevCart => 
+        prevCart.map(item => ({
+          ...item,
+          price: item.offerPrice || 0,
+          isComboApplied: false,
+          itemsInCombo: 0,
+          itemsAtOfferPrice: item.quantity
+        }))
+      );
+      return;
+    }
+
+    // Combo applied - calculate which items are in combo vs at offer price
+    const requiredQty = selectedCombo?.qtyProducts || 1;
+    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const comboSets = Math.floor(totalCartQty / requiredQty);
+    let itemsProcessedForCombo = 0;
+
+    setCart(prevCart => 
+      prevCart.map(item => {
+        const itemsInCombo = Math.min(
+          item.quantity, 
+          Math.max(0, requiredQty * comboSets - itemsProcessedForCombo)
+        );
+        const itemsAtOfferPrice = item.quantity - itemsInCombo;
+        
+        itemsProcessedForCombo += itemsInCombo;
+
+        return {
+          ...item,
+          price: item.discountedPrice || item.offerPrice || 0, // Show discounted price for display
+          isComboApplied: itemsInCombo > 0,
+          itemsInCombo: itemsInCombo,
+          itemsAtOfferPrice: itemsAtOfferPrice
+        };
+      })
+    );
+  };
+
+  // Validate if current combo is still applicable after cart changes
+  const validateComboAfterCartChange = () => {
+    if (!selectedCombo) return;
+
+    // Check minimum quantity requirement
+    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const requiredQty = selectedCombo.qtyProducts || 1;
+    
+    if (totalCartQty < requiredQty) {
+      setSelectedCombo(null);
+      updateCartPricing(false); // Switch back to offer prices
+      toast.error(`Combo removed: Need at least ${requiredQty} items`);
+      return;
+    }
+
+    // Check if cart total is still within combo price slots
+    const discountedCartTotal = cart.reduce((sum, item) => {
+      const itemDiscountedPrice = item.discountedPrice || item.offerPrice || 0;
+      return sum + (itemDiscountedPrice * item.quantity);
+    }, 0);
+    
+    const slots = selectedCombo.rules?.slots || [];
+    if (slots.length > 0) {
+      const isWithinSlots = slots.some(slot => 
+        discountedCartTotal >= slot.minPrice && discountedCartTotal <= slot.maxPrice
+      );
+      
+      if (!isWithinSlots) {
+        setSelectedCombo(null);
+        updateCartPricing(false);
+        toast.error('Combo removed: Cart total no longer within valid price range');
+        return;
+      }
+    }
   };
 
   const calculateSubtotal = () => {
@@ -152,73 +271,148 @@ const POSBillingPage = () => {
   const calculateTax = () => {
     return cart.reduce((sum, item) => {
       const itemTotal = (item.price || 0) * item.quantity;
-      // Use a default tax rate if pricing.tax is not available
-      const taxRate = item.pricing?.tax?.type === 'percentage' ? (item.pricing.tax.value || 0) / 100 : 0.18; // Default 18% GST
+      // Use GST rate from product or default 18% GST
+      const taxRate = (item.gstRate || 18) / 100;
       return sum + (itemTotal * taxRate);
     }, 0);
   };
 
   const calculateTotal = () => {
-    const subtotal = calculateSubtotal();
-    const tax = calculateTax();
-    const comboDiscount = calculateComboDiscount();
-    return Math.max(0, subtotal + tax - comboDiscount);
+    if (selectedCombo) {
+      // Calculate how many combo sets can be applied
+      const requiredQty = selectedCombo.qtyProducts || 1;
+      const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+      const comboSets = Math.floor(totalCartQty / requiredQty);
+      const remainingItems = totalCartQty % requiredQty;
+      
+      // Price for combo sets
+      const comboPrice = (selectedCombo.offerPrice || 0) * comboSets;
+      
+      // Price for remaining items (at offer price)
+      let remainingPrice = 0;
+      let itemsProcessed = 0;
+      
+      for (const item of cart) {
+        const itemsInCombo = Math.min(item.quantity, requiredQty * comboSets - itemsProcessed);
+        const itemsAtOfferPrice = item.quantity - itemsInCombo;
+        
+        if (itemsAtOfferPrice > 0) {
+          remainingPrice += (item.offerPrice || 0) * itemsAtOfferPrice;
+        }
+        
+        itemsProcessed += itemsInCombo;
+        if (itemsProcessed >= requiredQty * comboSets) break;
+      }
+      
+      const subtotal = comboPrice + remainingPrice;
+      const tax = calculateTax();
+      return subtotal + tax;
+    } else {
+      // When no combo, use regular calculation with offer prices
+      const subtotal = calculateSubtotal();
+      const tax = calculateTax();
+      return subtotal + tax;
+    }
   };
 
   const calculateComboSavings = (combo) => {
     if (!combo) return 0;
     
-    const cartTotal = calculateSubtotal();
-    if (combo.discountType === 'percentage') {
-      const discount = (cartTotal * combo.discountValue) / 100;
-      return combo.maxDiscount ? Math.min(discount, combo.maxDiscount) : discount;
-    } else if (combo.discountType === 'fixed') {
-      return combo.discountValue;
+    const requiredQty = combo.qtyProducts || 1;
+    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+    
+    // Check if cart has minimum required quantity
+    if (totalCartQty < requiredQty) {
+      return 0;
     }
-    return 0;
+    
+    // Calculate how many combo sets can be applied
+    const comboSets = Math.floor(totalCartQty / requiredQty);
+    
+    // Calculate what the combo items would cost at discounted prices
+    let discountedComboPrice = 0;
+    let itemsProcessed = 0;
+    
+    for (const item of cart) {
+      const itemsInCombo = Math.min(item.quantity, requiredQty * comboSets - itemsProcessed);
+      if (itemsInCombo > 0) {
+        const itemDiscountedPrice = item.discountedPrice || item.offerPrice || 0;
+        discountedComboPrice += itemDiscountedPrice * itemsInCombo;
+      }
+      
+      itemsProcessed += itemsInCombo;
+      if (itemsProcessed >= requiredQty * comboSets) break;
+    }
+    
+    // Calculate actual combo cost
+    const actualComboPrice = (combo.offerPrice || 0) * comboSets;
+    
+    // Savings = what items would cost at discounted price - actual combo price
+    return Math.max(0, discountedComboPrice - actualComboPrice);
   };
 
   const applyCombo = (combo) => {
-    if (!combo.isActive) {
-      toast.error('This combo is not currently active');
+    if (combo.paused) {
+      toast.error('This combo is currently paused');
       return;
     }
     
-    // Check minimum products requirement
-    const minProducts = combo.rules?.totalProducts?.min || 2;
-    if (cart.length < minProducts) {
-      toast.error(`Add at least ${minProducts} products to cart to use this combo`);
+    // Check if combo is within valid date range
+    const now = new Date();
+    if (combo.validFrom && new Date(combo.validFrom) > now) {
+      toast.error('This combo is not yet active');
+      return;
+    }
+    if (combo.validTo && new Date(combo.validTo) < now) {
+      toast.error('This combo has expired');
       return;
     }
     
-    const comboProductIds = combo.applicableProducts || [];
+    // Check minimum quantity requirement
+    const requiredQty = combo.qtyProducts || 1;
+    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
     
-    // If no specific products are required, combo applies to any cart
-    if (comboProductIds.length === 0) {
-      setSelectedCombo(combo);
-      const savings = calculateComboSavings(combo);
-      toast.success(`${combo.name} applied! Savings: ₹${savings.toFixed(0)}`);
+    if (totalCartQty < requiredQty) {
+      toast.error(`Add at least ${requiredQty} products to cart to use this combo`);
       return;
     }
     
-    // Check if cart contains any of the eligible products (not all)
-    const hasEligibleProducts = comboProductIds.some(productObj => {
-      const productId = typeof productObj === 'string' ? productObj : productObj._id;
-      return cart.some(item => item._id === productId);
-    });
+    // Check if cart total (based on DISCOUNTED PRICES) is within combo price slots
+    const discountedCartTotal = cart.reduce((sum, item) => {
+      const itemDiscountedPrice = item.discountedPrice || item.price || 0;
+      return sum + (itemDiscountedPrice * item.quantity);
+    }, 0);
+    const slots = combo.rules?.slots || [];
     
-    if (!hasEligibleProducts) {
-      toast.error('Cart does not contain any eligible products for this combo');
-      return;
+    if (slots.length > 0) {
+      let isWithinSlots = false;
+      for (const slot of slots) {
+        if (discountedCartTotal >= slot.minPrice && discountedCartTotal <= slot.maxPrice) {
+          isWithinSlots = true;
+          break;
+        }
+      }
+      
+      if (!isWithinSlots) {
+        const slotRanges = slots.map(slot => `₹${slot.minPrice}-₹${slot.maxPrice}`).join(', ');
+        toast.error(`Cart total (discounted prices) should be within combo price ranges: ${slotRanges}`);
+        return;
+      }
     }
     
     setSelectedCombo(combo);
-    const savings = calculateComboSavings(combo);
-    toast.success(`${combo.name} applied! Savings: ₹${savings.toFixed(0)}`);
+    updateCartPricing(true); // Switch to discounted prices
+    
+    // Calculate savings after price update
+    setTimeout(() => {
+      const savings = calculateComboSavings(combo);
+      toast.success(`${combo.name} applied! Savings: ₹${savings.toFixed(0)}`);
+    }, 0);
   };
 
   const removeCombo = () => {
     setSelectedCombo(null);
+    updateCartPricing(false); // Switch back to offer prices
     toast.success('Combo removed');
   };
 
@@ -330,13 +524,165 @@ const POSBillingPage = () => {
   };
 
   const printReceipt = () => {
-    window.print();
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Please allow popups to print receipt');
+      return;
+    }
+
+    const receiptHTML = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Receipt - ${lastBill.billNumber}</title>
+          <style>
+            @page { margin: 10mm; }
+            body { 
+              font-family: 'Courier New', monospace; 
+              font-size: 12px; 
+              line-height: 1.4;
+              margin: 0;
+              padding: 10px;
+            }
+            .center { text-align: center; }
+            .bold { font-weight: bold; }
+            .divider { border-top: 1px dashed #000; margin: 8px 0; }
+            .flex-between { display: flex; justify-content: space-between; }
+            .item-line { margin: 2px 0; }
+            .total-line { border-top: 1px solid #000; padding-top: 5px; margin-top: 5px; }
+            @media print {
+              body { margin: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="center">
+            <div class="bold" style="font-size: 16px;">YOUR STORE NAME</div>
+            <div>123 Store Address, City</div>
+            <div>Phone: +91 98765 43210</div>
+            <div>GST: 27XXXXX1234X1ZX</div>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="flex-between">
+            <span>Bill No: ${lastBill.billNumber}</span>
+            <span>Date: ${new Date(lastBill.date).toLocaleString()}</span>
+          </div>
+          
+          ${(lastBill.customer.name || lastBill.customer.phone) ? `
+          <div>
+            <strong>Customer:</strong><br>
+            ${lastBill.customer.name || 'N/A'}<br>
+            ${lastBill.customer.phone || 'N/A'}
+          </div>
+          <div class="divider"></div>
+          ` : ''}
+          
+          <div style="margin: 10px 0;">
+            <div class="flex-between bold">
+              <span>Item</span>
+              <span>Qty</span>
+              <span>Rate</span>
+              <span>Amount</span>
+            </div>
+            <div class="divider"></div>
+            
+            ${lastBill.items.map(item => `
+              <div class="item-line">
+                <div>${item.name}</div>
+                <div class="flex-between">
+                  <span>${item.quantity} x ₹${item.price.toLocaleString()}</span>
+                  <span class="bold">₹${(item.price * item.quantity).toLocaleString()}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          
+          <div class="total-line">
+            <div class="flex-between">
+              <span>Subtotal:</span>
+              <span>₹${lastBill.subtotal.toLocaleString()}</span>
+            </div>
+            ${lastBill.combo ? `
+            <div class="flex-between" style="color: #008000;">
+              <span>Combo Discount (${lastBill.combo.name}):</span>
+              <span>-₹${calculateComboDiscount().toLocaleString()}</span>
+            </div>
+            ` : ''}
+            <div class="flex-between">
+              <span>Tax (GST):</span>
+              <span>₹${lastBill.tax.toLocaleString()}</span>
+            </div>
+            <div class="flex-between bold" style="font-size: 14px;">
+              <span>TOTAL:</span>
+              <span>₹${lastBill.total.toLocaleString()}</span>
+            </div>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div>
+            <div class="flex-between">
+              <span>Payment Method:</span>
+              <span class="bold">${lastBill.paymentMethod.toUpperCase()}</span>
+            </div>
+            ${lastBill.paymentMethod === 'cash' ? `
+            <div class="flex-between">
+              <span>Received:</span>
+              <span>₹${lastBill.receivedAmount.toLocaleString()}</span>
+            </div>
+            <div class="flex-between">
+              <span>Change:</span>
+              <span>₹${lastBill.change.toLocaleString()}</span>
+            </div>
+            ` : ''}
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="center">
+            <div>Thank you for shopping with us!</div>
+            <div>Visit again soon</div>
+            <div style="margin-top: 10px; font-size: 10px;">
+              Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          
+          <div class="no-print" style="text-align: center; margin-top: 20px;">
+            <button onclick="window.print(); window.close();" 
+                    style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
+              Print Receipt
+            </button>
+            <button onclick="window.close();" 
+                    style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
+              Close
+            </button>
+          </div>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(receiptHTML);
+    printWindow.document.close();
+    printWindow.focus();
   };
 
   const newSale = () => {
     setShowReceipt(false);
     setLastBill(null);
-    barcodeInputRef.current?.focus();
+    setCart([]);
+    setSelectedCombo(null);
+    setCustomerInfo({ name: '', phone: '', email: '' });
+    setPaymentMethod('cash');
+    setReceivedAmount('');
+    setSearchTerm('');
+    setBarcodeInput('');
+    setSelectedCategory('');
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 100);
   };
 
   if (loading) {
@@ -391,6 +737,9 @@ const POSBillingPage = () => {
                       className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
                       autoFocus
                     />
+                    <div className="absolute right-3 top-3">
+                      <Scan className="h-4 w-4 text-green-500 animate-pulse" />
+                    </div>
                   </div>
                   
                   {/* Product Search */}
@@ -444,7 +793,12 @@ const POSBillingPage = () => {
                     >
                       <h4 className="font-medium text-sm text-gray-900 truncate">{product.name || 'Unknown Product'}</h4>
                       <p className="text-xs text-gray-600 truncate">{product.productCode || 'N/A'}</p>
-                      <p className="text-lg font-bold text-green-600">₹{(product.pricing?.sellingPrice || 0).toLocaleString()}</p>
+                      <div className="flex flex-col">
+                        <p className="text-lg font-bold text-green-600">₹{(product.pricing?.offerPrice || 0).toLocaleString()}</p>
+                        {product.pricing?.discountedPrice && product.pricing.discountedPrice !== product.pricing.offerPrice && (
+                          <p className="text-xs text-blue-600">Combo: ₹{(product.pricing.discountedPrice || 0).toLocaleString()}</p>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-500">Stock: {product.inventory?.currentStock || 0}</p>
                     </button>
                   ))}
@@ -498,7 +852,20 @@ const POSBillingPage = () => {
                 {cart.map(item => (
                   <div key={item._id} className="bg-gray-50 rounded-lg p-3">
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="font-medium text-sm text-gray-900">{item.name}</h4>
+                      <div>
+                        <h4 className="font-medium text-sm text-gray-900">{item.name}</h4>
+                        {selectedCombo && (item.itemsInCombo > 0 || item.itemsAtOfferPrice > 0) && (
+                          <div className="text-xs text-gray-600">
+                            {item.itemsInCombo > 0 && (
+                              <span className="text-green-600">{item.itemsInCombo} in combo</span>
+                            )}
+                            {item.itemsInCombo > 0 && item.itemsAtOfferPrice > 0 && <span>, </span>}
+                            {item.itemsAtOfferPrice > 0 && (
+                              <span className="text-orange-600">{item.itemsAtOfferPrice} at offer price</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <button
                         onClick={() => removeFromCart(item._id)}
                         className="text-red-600 hover:text-red-800"
@@ -525,7 +892,25 @@ const POSBillingPage = () => {
                       </div>
                       
                       <div className="text-right">
-                        <p className="text-sm text-gray-600">₹{(item.price || 0).toLocaleString()} each</p>
+                        <p className="text-sm font-semibold text-green-600">₹{(item.price || 0).toLocaleString()} each</p>
+                        
+                        {/* Show pricing context based on combo status */}
+                        {selectedCombo && item.isComboApplied ? (
+                          <>
+                            {item.offerPrice && item.offerPrice !== item.price && (
+                              <p className="text-xs text-gray-500 line-through">Offer: ₹{item.offerPrice.toLocaleString()}</p>
+                            )}
+                            <p className="text-xs text-blue-600">Combo: Discounted Price</p>
+                          </>
+                        ) : (
+                          <>
+                            {item.discountedPrice && item.discountedPrice !== item.price && (
+                              <p className="text-xs text-gray-400">Available: ₹{item.discountedPrice.toLocaleString()}</p>
+                            )}
+                            <p className="text-xs text-orange-600">No Combo: Offer Price</p>
+                          </>
+                        )}
+                        
                         <p className="font-semibold text-green-600">₹{((item.price || 0) * item.quantity).toLocaleString()}</p>
                       </div>
                     </div>
@@ -541,9 +926,10 @@ const POSBillingPage = () => {
             {cart.length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Available Combos</h4>
+                <p className="text-xs text-blue-600 mb-2">* Combos applied on discounted prices</p>
                 <div className="space-y-2 max-h-32 overflow-y-auto">
                   {(() => {
-                    const activeCombos = combos.filter(combo => combo.isActive);
+                    const activeCombos = combos.filter(combo => !combo.paused);
                     if (activeCombos.length === 0) {
                       return (
                         <div className="text-sm text-gray-500 p-2 border border-gray-200 rounded">
@@ -553,23 +939,34 @@ const POSBillingPage = () => {
                     }
                     
                     return activeCombos.slice(0, 3).map((combo) => {
-                      const eligibleProducts = (combo.applicableProducts || []);
+                      // Check if combo is currently valid
+                      const now = new Date();
+                      const isActive = (!combo.validFrom || new Date(combo.validFrom) <= now) &&
+                                      (!combo.validTo || new Date(combo.validTo) >= now);
                       
-                      // If no specific products are required, combo applies to any cart
-                      let hasEligibleProducts = false;
+                      if (!isActive) return null;
                       
-                      if (eligibleProducts.length === 0) {
-                        // Universal combo - applies to any products
-                        hasEligibleProducts = true;
-                      } else {
-                        // Check if cart contains any of the eligible products
-                        hasEligibleProducts = eligibleProducts.some(eligibleProduct => {
-                          const productId = typeof eligibleProduct === 'string' ? eligibleProduct : eligibleProduct._id;
-                          return cart.some(item => item._id === productId);
-                        });
+                      // Check if cart meets minimum quantity
+                      const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+                      const requiredQty = combo.qtyProducts || 1;
+                      
+                      if (totalCartQty < requiredQty) return null;
+                      
+                      // Check if cart total (DISCOUNTED PRICES) is within combo price slots
+                      const discountedCartTotal = cart.reduce((sum, item) => {
+                        const itemDiscountedPrice = item.discountedPrice || item.offerPrice || 0;
+                        return sum + (itemDiscountedPrice * item.quantity);
+                      }, 0);
+                      const slots = combo.rules?.slots || [];
+                      
+                      let isEligible = true;
+                      if (slots.length > 0) {
+                        isEligible = slots.some(slot => 
+                          discountedCartTotal >= slot.minPrice && discountedCartTotal <= slot.maxPrice
+                        );
                       }
                       
-                      if (!hasEligibleProducts) return null;
+                      if (!isEligible) return null;
                       
                       const estimatedSavings = calculateComboSavings(combo);
                       
@@ -587,13 +984,11 @@ const POSBillingPage = () => {
                             <div>
                               <p className="font-medium text-gray-900">{combo.name}</p>
                               <p className="text-gray-600">
-                                {combo.discountType === 'percentage' 
-                                  ? `${combo.discountValue}% off` 
-                                  : `₹${combo.discountValue} off`}
+                                {combo.qtyProducts} items for ₹{combo.offerPrice}
                               </p>
                             </div>
                             <div className="text-right">
-                              <p className="font-semibold text-green-600">₹{estimatedSavings}</p>
+                              <p className="font-semibold text-green-600">₹{estimatedSavings.toFixed(0)}</p>
                               <button className="text-xs bg-blue-600 text-white px-2 py-1 rounded">
                                 Apply
                               </button>
@@ -614,9 +1009,7 @@ const POSBillingPage = () => {
                   <div>
                     <p className="text-sm font-medium text-green-800">{selectedCombo.name}</p>
                     <p className="text-xs text-green-600">
-                      {selectedCombo.discountType === 'percentage' 
-                        ? `${selectedCombo.discountValue}% off` 
-                        : `₹${selectedCombo.discountValue} off`}
+                      {selectedCombo.qtyProducts} items for ₹{selectedCombo.offerPrice}
                     </p>
                   </div>
                   <div className="flex items-center space-x-2">
@@ -636,24 +1029,102 @@ const POSBillingPage = () => {
             )}
             
             <div className="space-y-2 mb-4">
-              <div className="flex justify-between text-sm">
-                <span>Subtotal:</span>
-                <span>₹{calculateSubtotal().toLocaleString()}</span>
-              </div>
-              {selectedCombo && (
-                <div className="flex justify-between text-sm text-green-600">
-                  <span>Combo Discount:</span>
-                  <span>-₹{calculateComboDiscount().toLocaleString()}</span>
-                </div>
+              {selectedCombo ? (
+                <>
+                  <div className="bg-green-50 p-2 rounded text-sm">
+                    <div className="font-medium text-green-800">Combo Applied: {selectedCombo.name}</div>
+                    <div className="text-xs text-green-600">
+                      {(() => {
+                        const requiredQty = selectedCombo.qtyProducts || 1;
+                        const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+                        const comboSets = Math.floor(totalCartQty / requiredQty);
+                        const remainingItems = totalCartQty % requiredQty;
+                        return (
+                          <>
+                            {comboSets} combo set(s) of {requiredQty} items each
+                            {remainingItems > 0 && `, ${remainingItems} items at offer price`}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  
+                  {(() => {
+                    const requiredQty = selectedCombo.qtyProducts || 1;
+                    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
+                    const comboSets = Math.floor(totalCartQty / requiredQty);
+                    const remainingItems = totalCartQty % requiredQty;
+                    
+                    // Calculate remaining items price
+                    let remainingPrice = 0;
+                    let itemsProcessed = 0;
+                    
+                    for (const item of cart) {
+                      const itemsInCombo = Math.min(item.quantity, requiredQty * comboSets - itemsProcessed);
+                      const itemsAtOfferPrice = item.quantity - itemsInCombo;
+                      
+                      if (itemsAtOfferPrice > 0) {
+                        remainingPrice += (item.offerPrice || 0) * itemsAtOfferPrice;
+                      }
+                      
+                      itemsProcessed += itemsInCombo;
+                      if (itemsProcessed >= requiredQty * comboSets) break;
+                    }
+                    
+                    return (
+                      <>
+                        {comboSets > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span>Combo ({comboSets} × {requiredQty} items):</span>
+                            <span>₹{(selectedCombo.offerPrice * comboSets).toLocaleString()}</span>
+                          </div>
+                        )}
+                        {remainingItems > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span>Remaining items ({remainingItems}):</span>
+                            <span>₹{remainingPrice.toLocaleString()}</span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                  
+                  <div className="flex justify-between text-sm">
+                    <span>Tax (GST):</span>
+                    <span>₹{calculateTax().toLocaleString()}</span>
+                  </div>
+                  <div className="border-t border-gray-200 pt-2 mt-2">
+                    <div className="flex justify-between text-lg font-bold">
+                      <span>Total:</span>
+                      <span className="text-green-600">₹{calculateTotal().toLocaleString()}</span>
+                    </div>
+                    <div className="text-xs text-green-600 text-right">
+                      You saved ₹{calculateComboSavings(selectedCombo).toLocaleString()}!
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-orange-50 p-2 rounded text-sm">
+                    <div className="font-medium text-orange-800">No Combo Applied</div>
+                    <div className="text-xs text-orange-600">All items at offer prices</div>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Subtotal:</span>
+                    <span>₹{calculateSubtotal().toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Tax (GST):</span>
+                    <span>₹{calculateTax().toLocaleString()}</span>
+                  </div>
+                  <div className="border-t border-gray-200 pt-2 mt-2">
+                    <div className="flex justify-between text-lg font-bold">
+                      <span>Total:</span>
+                      <span className="text-green-600">₹{calculateTotal().toLocaleString()}</span>
+                    </div>
+                  </div>
+                </>
               )}
-              <div className="flex justify-between text-sm">
-                <span>Tax:</span>
-                <span>₹{calculateTax().toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-lg font-bold">
-                <span>Total:</span>
-                <span>₹{calculateTotal().toLocaleString()}</span>
-              </div>
             </div>
             
             <button

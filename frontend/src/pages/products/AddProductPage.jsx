@@ -49,6 +49,7 @@ const AddProductPage = () => {
   
   const [categories, setCategories] = useState([]);
   const [subcategories, setSubcategories] = useState([]);
+  const [allCategories, setAllCategories] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generatedCode, setGeneratedCode] = useState('');
@@ -56,6 +57,7 @@ const AddProductPage = () => {
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [vendorSearch, setVendorSearch] = useState('');
+  const [mixedBundleConfig, setMixedBundleConfig] = useState([]);
   
   const BRANCH_CODE = "SHI";
 
@@ -64,6 +66,67 @@ const AddProductPage = () => {
     loadCategoriesAndVendors();
   }, []);
 
+  // Load subcategories when category changes
+  useEffect(() => {
+    if (formData.category && allCategories.length > 0) {
+      const categorySubcategories = allCategories.filter(cat => {
+        if (!cat.parent) return false;
+        const parentId = typeof cat.parent === 'object' && cat.parent ? cat.parent._id : cat.parent;
+        return parentId === formData.category;
+      });
+      setSubcategories(categorySubcategories);
+    } else {
+      setSubcategories([]);
+    }
+  }, [formData.category, allCategories]);
+
+  // Auto-generate mixedBundleConfig when bundle type, sizes, or colors change
+  useEffect(() => {
+    if (formData.bundleType && (formData.sizes || formData.colors)) {
+      const sizes = formData.sizes.split(',').filter(s => s.trim()).map(s => s.trim());
+      const colors = formData.colors.split(',').filter(c => c.trim()).map(c => c.trim());
+      
+      let newConfig = [];
+      
+      if (formData.bundleType === 'sameSizeDifferentColors' && colors.length > 0) {
+        // Generate config for each color with size fixed
+        const baseSize = sizes[0] || 'S';
+        newConfig = colors.map(color => ({
+          key: `color-${color}`,
+          size: baseSize,
+          color: color,
+          quantity: 0
+        }));
+      } else if (formData.bundleType === 'differentSizesSameColor' && sizes.length > 0) {
+        // Generate config for each size with color fixed
+        const baseColor = colors[0] || 'Black';
+        newConfig = sizes.map(size => ({
+          key: `size-${size}`,
+          size: size,
+          color: baseColor,
+          quantity: 0
+        }));
+      } else if (formData.bundleType === 'mixedSizeMixedColor' && sizes.length > 0 && colors.length > 0) {
+        // Generate config for all size-color combinations
+        sizes.forEach(size => {
+          colors.forEach(color => {
+            newConfig.push({
+              key: `${size}-${color}`,
+              size: size,
+              color: color,
+              quantity: 0
+            });
+          });
+        });
+      }
+      
+      // Only update if the config structure changed
+      if (newConfig.length > 0 && JSON.stringify(newConfig.map(c => c.key)) !== JSON.stringify(mixedBundleConfig.map(c => c.key))) {
+        setMixedBundleConfig(newConfig);
+      }
+    }
+  }, [formData.bundleType, formData.sizes, formData.colors]);
+
   const loadCategoriesAndVendors = async () => {
     try {
       const [categoriesData, vendorsData] = await Promise.all([
@@ -71,7 +134,14 @@ const AddProductPage = () => {
         vendorService.getVendors()
       ]);
       
-      setCategories(categoriesData.data || categoriesData || []);
+      // Store all categories for subcategory filtering
+      const allCategoriesData = categoriesData.data || categoriesData || [];
+      setAllCategories(allCategoriesData);
+      
+      // Filter to only show main categories (no parent) in the dropdown
+      const mainCategories = allCategoriesData.filter(cat => !cat.parent || cat.parent === null);
+      
+      setCategories(mainCategories);
       setVendors(vendorsData.data || vendorsData || []);
     } catch (error) {
       console.error('Error loading categories and vendors:', error);
@@ -130,16 +200,12 @@ const AddProductPage = () => {
       const existingProducts = await productService.getProducts();
       const products = existingProducts.data || existingProducts || [];
       
-      console.log('Total products found:', products.length);
-      
       const existingCodes = products
         .filter(p => p.code && p.code.startsWith(`${BRANCH_CODE}/${categoryCode}/`))
         .map(p => {
           const parts = p.code.split('/');
           return parts[2]; // Extract the serial part like "A00001"
         });
-
-      console.log('Existing codes for category', categoryCode, ':', existingCodes);
 
       let maxSerial = 0;
       let maxChar = "A";
@@ -185,10 +251,6 @@ const AddProductPage = () => {
       const serialStr = maxChar + String(maxSerial).padStart(5, "0");
       const newCode = `${BRANCH_CODE}/${categoryCode}/${serialStr}`;
       
-      console.log('Generated new code:', newCode);
-      console.log('Previous max was:', (maxSerial === 1 && maxChar !== "A") ? 
-        String.fromCharCode(maxChar.charCodeAt(0) - 1) + "99999" : 
-        maxChar + String(maxSerial - 1).padStart(5, "0"));
       return newCode;
     } catch (error) {
       console.error('Error generating product code:', error);
@@ -232,28 +294,80 @@ const AddProductPage = () => {
       const quantity = parseInt(formData.quantity);
       let preview = `🧾 Generated Product Codes:\n\n`;
       
-      if (formData.bundleType) {
+      if (formData.bundleType && formData.bundleType !== '') {
         const sizes = formData.sizes ? formData.sizes.split(',').map(s => s.trim()).filter(s => s) : [];
         const colors = formData.colors ? formData.colors.split(',').map(c => c.trim()).filter(c => c) : [];
         
+        preview += `✅ Product Code: ${productCode}\n`;
+        preview += `✅ Barcode: ${barcode}\n\n`;
+        
         if (formData.bundleType === 'sameSizeDifferentColors') {
-          const perColor = quantity / colors.length;
-          preview += `👕 Bundle: Same Size (${sizes[0]}), Different Colors\n`;
-          colors.forEach((color, i) => {
-            const childCode = i === 0 ? productCode : `${productCode}/${(i).toString().padStart(2, '0')}`;
-            preview += `  - ${color}: ${perColor} items (${childCode})\n`;
-          });
+          preview += `👕 Bundle Type: Same Size, Different Colors\n`;
+          preview += `📏 Size: ${sizes[0] || 'Not specified'}\n`;
+          preview += `🎨 Colors: ${colors.length > 0 ? colors.join(', ') : 'Not specified'}\n`;
+          preview += `📦 Total Quantity: ${quantity}\n\n`;
+          preview += `📋 Distribution:\n`;
+          
+          // Check if custom quantities are set
+          const customQuantities = mixedBundleConfig.filter(item => item.quantity > 0 && item.color);
+          if (customQuantities.length > 0) {
+            customQuantities.forEach((config, i) => {
+              const childCode = i === 0 ? productCode : `${productCode}/${(i + 1).toString().padStart(2, '0')}`;
+              preview += `  ${i + 1}. ${config.color}: ${config.quantity} items (${childCode})\n`;
+            });
+          } else {
+            preview += `  ⚠️ No custom quantities configured for colors\n`;
+          }
         } else if (formData.bundleType === 'differentSizesSameColor') {
-          const perSize = quantity / sizes.length;
-          preview += `👕 Bundle: Different Sizes, Same Color (${colors[0]})\n`;
-          sizes.forEach((size, i) => {
-            const childCode = i === 0 ? productCode : `${productCode}/${(i).toString().padStart(2, '0')}`;
-            preview += `  - ${size}: ${perSize} items (${childCode})\n`;
-          });
+          preview += `👕 Bundle Type: Different Sizes, Same Color\n`;
+          preview += `📏 Sizes: ${sizes.length > 0 ? sizes.join(', ') : 'Not specified'}\n`;
+          preview += `🎨 Color: ${colors[0] || 'Not specified'}\n`;
+          preview += `📦 Total Quantity: ${quantity}\n\n`;
+          preview += `📋 Distribution:\n`;
+          
+          // Check if custom quantities are set
+          const customQuantities = mixedBundleConfig.filter(item => item.quantity > 0 && item.size);
+          if (customQuantities.length > 0) {
+            customQuantities.forEach((config, i) => {
+              const childCode = i === 0 ? productCode : `${productCode}/${(i + 1).toString().padStart(2, '0')}`;
+              preview += `  ${i + 1}. ${config.size}: ${config.quantity} items (${childCode})\n`;
+            });
+          } else {
+            preview += `  ⚠️ No custom quantities configured for sizes\n`;
+          }
+        } else if (formData.bundleType === 'mixedSizeMixedColor') {
+          preview += `👕 Bundle Type: Mixed Size & Color\n`;
+          preview += `📏 Sizes: ${sizes.length > 0 ? sizes.join(', ') : 'Not specified'}\n`;
+          preview += `🎨 Colors: ${colors.length > 0 ? colors.join(', ') : 'Not specified'}\n`;
+          preview += `📦 Total Quantity: ${quantity} (kept in parent)\n\n`;
+          preview += `📋 Parent-Child Hierarchy:\n`;
+          preview += `  Parent: ${formData.name} - ${quantity} items (${productCode})\n`;
+          preview += `  Children (Reference Variants):\n`;
+          
+          if (sizes.length > 0 && colors.length > 0) {
+            let configIndex = 1;
+            
+            sizes.forEach(size => {
+              colors.forEach(color => {
+                const childCode = `${productCode}/${configIndex.toString().padStart(2, '0')}`;
+                preview += `    ${configIndex}. ${size}-${color} (${childCode})\n`;
+                configIndex++;
+              });
+            });
+            
+            preview += `\n💡 All ${quantity} items are kept in the parent product.\n`;
+            preview += `   Children are reference variants for size-color combinations.\n`;
+          } else {
+            preview += `  ⚠️ Please specify both sizes and colors\n`;
+          }
+        } else {
+          preview += `❓ Unknown Bundle Type: ${formData.bundleType}\n`;
         }
       } else {
-        preview += `👕 Single Product: ${productCode}\n`;
-        preview += `  - Quantity: ${quantity} items\n`;
+        preview += `✅ Product Code: ${productCode}\n`;
+        preview += `✅ Barcode: ${barcode}\n\n`;
+        preview += `👕 Single Product\n`;
+        preview += `📦 Quantity: ${quantity} items\n`;
       }
       
       alert(preview);
@@ -264,7 +378,7 @@ const AddProductPage = () => {
     }
   };
 
-  const handleInputChange = (e) => {
+  const handleInputChange = async (e) => {
     const { name, value, type, checked } = e.target;
     
     if (name.includes('.')) {
@@ -281,6 +395,13 @@ const AddProductPage = () => {
         ...prev,
         [name]: type === 'checkbox' ? checked : value
       }));
+      
+      // Subcategories are now loaded by useEffect, no need to duplicate here
+      
+      // Reset bundle configuration when bundle type changes
+      if (name === 'bundleType') {
+        setMixedBundleConfig([]);
+      }
     }
   };
 
@@ -334,8 +455,15 @@ const AddProductPage = () => {
         toast.error('Enter colors for the bundle');
         return false;
       }
-      if (quantity % colors.length !== 0) {
-        toast.error(`Quantity (${quantity}) must be divisible by number of colors (${colors.length})`);
+      
+      // Check if custom quantities are configured and match total
+      const configuredQuantity = mixedBundleConfig.reduce((sum, item) => sum + item.quantity, 0);
+      if (configuredQuantity === 0) {
+        toast.error('Configure custom quantities for each color');
+        return false;
+      }
+      if (configuredQuantity !== quantity) {
+        toast.error(`Total configured quantity (${configuredQuantity}) must equal the main quantity (${quantity})`);
         return false;
       }
     }
@@ -349,10 +477,29 @@ const AddProductPage = () => {
         toast.error('Enter sizes for the bundle');
         return false;
       }
-      if (quantity % sizes.length !== 0) {
-        toast.error(`Quantity (${quantity}) must be divisible by number of sizes (${sizes.length})`);
+      
+      // Check if custom quantities are configured and match total
+      const configuredQuantity = mixedBundleConfig.reduce((sum, item) => sum + item.quantity, 0);
+      if (configuredQuantity === 0) {
+        toast.error('Configure custom quantities for each size');
         return false;
       }
+      if (configuredQuantity !== quantity) {
+        toast.error(`Total configured quantity (${configuredQuantity}) must equal the main quantity (${quantity})`);
+        return false;
+      }
+    }
+
+    if (formData.bundleType === 'mixedSizeMixedColor') {
+      if (sizes.length === 0) {
+        toast.error('Enter sizes for the mixed bundle');
+        return false;
+      }
+      if (colors.length === 0) {
+        toast.error('Enter colors for the mixed bundle');
+        return false;
+      }
+      // No custom quantity validation needed for mixedSizeMixedColor
     }
 
     return true;
@@ -366,13 +513,37 @@ const AddProductPage = () => {
     const colors = formData.colors ? formData.colors.split(',').map(c => c.trim()).filter(c => c) : [];
 
     if (formData.bundleType === 'sameSizeDifferentColors' && colors.length > 0 && sizes.length > 0) {
-      const perColor = Math.floor(quantity / colors.length);
-      return `${perColor} items per color: ${colors.join(', ')} - all in size ${sizes[0]} (Total: ${perColor * colors.length})`;
+      // Check if custom quantities are set
+      const customQuantities = mixedBundleConfig.filter(item => item.quantity > 0 && item.color);
+      if (customQuantities.length > 0) {
+        const distributions = customQuantities.map(item => `${item.color}: ${item.quantity}`).join(', ');
+        const total = customQuantities.reduce((sum, item) => sum + item.quantity, 0);
+        return `Custom distribution for size ${sizes[0]}: ${distributions} (Total: ${total})`;
+      } else {
+        const perColor = Math.floor(quantity / colors.length);
+        return `${perColor} items per color: ${colors.join(', ')} - all in size ${sizes[0]} (Total: ${perColor * colors.length})`;
+      }
     }
 
     if (formData.bundleType === 'differentSizesSameColor' && sizes.length > 0 && colors.length > 0) {
-      const perSize = Math.floor(quantity / sizes.length);
-      return `${perSize} items per size: ${sizes.join(', ')} - all in ${colors[0]} color (Total: ${perSize * sizes.length})`;
+      // Check if custom quantities are set
+      const customQuantities = mixedBundleConfig.filter(item => item.quantity > 0 && item.size);
+      if (customQuantities.length > 0) {
+        const distributions = customQuantities.map(item => `${item.size}: ${item.quantity}`).join(', ');
+        const total = customQuantities.reduce((sum, item) => sum + item.quantity, 0);
+        return `Custom distribution for ${colors[0]} color: ${distributions} (Total: ${total})`;
+      } else {
+        const perSize = Math.floor(quantity / sizes.length);
+        return `${perSize} items per size: ${sizes.join(', ')} - all in ${colors[0]} color (Total: ${perSize * sizes.length})`;
+      }
+    }
+
+    if (formData.bundleType === 'mixedSizeMixedColor' && mixedBundleConfig.length > 0) {
+      const configuredTotal = mixedBundleConfig.reduce((sum, item) => sum + item.quantity, 0);
+      const combinations = mixedBundleConfig.filter(item => item.quantity > 0).map(item => 
+        `${item.size}-${item.color}: ${item.quantity}`
+      ).join(', ');
+      return `Total quantity: ${configuredTotal} items`;
     }
 
     return null;
@@ -428,10 +599,10 @@ const AddProductPage = () => {
         subcategory: formData.subcategory,
         vendor: selectedVendor._id,
         pricing: {
-          costPrice: parseFloat(formData.factoryPrice),
-          sellingPrice: parseFloat(formData.offerPrice),
-          mrp: parseFloat(formData.mrp),
-          wholesalePrice: parseFloat(formData.offerPrice) * 0.9 // 10% less than selling price
+          factoryPrice: parseFloat(formData.factoryPrice),
+          offerPrice: parseFloat(formData.offerPrice),
+          discountedPrice: parseFloat(formData.discountedPrice),
+          mrp: parseFloat(formData.mrp)
         },
         inventory: {
           currentStock: parseInt(formData.quantity),
@@ -448,46 +619,52 @@ const AddProductPage = () => {
 
       // Add bundle configuration if it's a bundle
       if (formData.bundleType) {
-        console.log('=== FORM SUBMISSION DEBUG ===');
-        console.log('Raw formData.bundleType:', formData.bundleType);
-        console.log('Raw formData.sizes:', formData.sizes);
-        console.log('Raw formData.colors:', formData.colors);
-        console.log('Raw formData.quantity:', formData.quantity);
-        
         const sizes = formData.sizes ? formData.sizes.split(',').map(s => s.trim()).filter(s => s) : [];
         const colors = formData.colors ? formData.colors.split(',').map(c => c.trim()).filter(c => c) : [];
         
-        console.log('Parsed sizes:', sizes);
-        console.log('Parsed colors:', colors);
-        console.log('Bundle type check - sameSizeDifferentColors:', formData.bundleType === 'sameSizeDifferentColors');
-        console.log('Bundle type check - differentSizesSameColor:', formData.bundleType === 'differentSizesSameColor');
-        
         // Determine correct bundle type
         let bundleType = 'custom';
+        let bundleSize = 1;
+        
         if (formData.bundleType === 'sameSizeDifferentColors') {
           bundleType = 'same_size_different_colors';
+          bundleSize = colors.length;
         } else if (formData.bundleType === 'differentSizesSameColor') {
           bundleType = 'different_sizes_same_color';
+          bundleSize = sizes.length;
+        } else if (formData.bundleType === 'mixedSizeMixedColor') {
+          bundleType = 'different_sizes_different_colors';
+          bundleSize = sizes.length * colors.length; // Total combinations
         }
         
-        console.log('Final bundleType:', bundleType);
-        console.log('bundleSize calculation:', (formData.bundleType === 'sameSizeDifferentColors' ? colors.length : sizes.length));
-        console.log('=== END DEBUG ===');
+        const bundleConfig = {
+          baseSize: formData.bundleType === 'sameSizeDifferentColors' ? sizes[0] : 
+                   sizes.length > 0 ? sizes[0] : null,
+          baseColor: formData.bundleType === 'differentSizesSameColor' ? colors[0] : 
+                    colors.length > 0 ? colors[0] : null,
+          sizes: sizes,
+          colors: colors,
+          quantity: parseInt(formData.quantity),
+          priceVariation: 0
+        };
+        
+        // Add mixed bundle configuration for specific bundle types only
+        if (formData.bundleType === 'sameSizeDifferentColors') {
+          // For same size different colors, create mixed config from color quantities
+          bundleConfig.mixedConfig = mixedBundleConfig.filter(item => item.quantity > 0 && item.color);
+        } else if (formData.bundleType === 'differentSizesSameColor') {
+          // For different sizes same color, create mixed config from size quantities
+          bundleConfig.mixedConfig = mixedBundleConfig.filter(item => item.quantity > 0 && item.size);
+        }
+        // Note: mixedSizeMixedColor does NOT use custom quantities - just total quantity
         
         baseProduct.bundle = {
           isBundle: true,
           bundleType: bundleType,
-          bundleSize: (formData.bundleType === 'sameSizeDifferentColors' ? colors.length : sizes.length),
+          bundleSize: bundleSize,
           autoGenerateChildren: true,
           bundlePrefix: formData.name.substring(0, 5).toUpperCase(),
-          bundleConfig: {
-            baseSize: formData.bundleType === 'sameSizeDifferentColors' ? sizes[0] : sizes.length > 0 ? sizes[0] : null,
-            baseColor: formData.bundleType === 'differentSizesSameColor' ? colors[0] : colors.length > 0 ? colors[0] : null,
-            sizes: sizes,
-            colors: colors,
-            quantity: parseInt(formData.quantity), // Use total quantity, not per-variant
-            priceVariation: 0
-          }
+          bundleConfig: bundleConfig
         };
         
         // Set parent product specifications
@@ -501,10 +678,6 @@ const AddProductPage = () => {
       }
 
       // Create the product (backend will handle child creation for bundles)
-      console.log('=== FINAL PAYLOAD TO API ===');
-      console.log('baseProduct.bundle:', JSON.stringify(baseProduct.bundle, null, 2));
-      console.log('=== END PAYLOAD DEBUG ===');
-      
       const result = await productService.createProduct(baseProduct);
       
       if (formData.bundleType) {
@@ -586,7 +759,7 @@ const AddProductPage = () => {
                     <select
                       name="category"
                       value={formData.category}
-                      onChange={handleCategoryChange}
+                      onChange={handleInputChange}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
                     >
@@ -603,14 +776,23 @@ const AddProductPage = () => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Subcategory
                     </label>
-                    <input
-                      type="text"
+                    <select
                       name="subcategory"
                       value={formData.subcategory}
                       onChange={handleInputChange}
-                      placeholder="Enter subcategory"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                      disabled={!formData.category}
+                    >
+                      <option value="">Select Subcategory</option>
+                      {subcategories.map(subcategory => (
+                        <option key={subcategory._id} value={subcategory._id}>
+                          {subcategory.name} - {subcategory.code}
+                        </option>
+                      ))}
+                    </select>
+                    {!formData.category && (
+                      <p className="text-xs text-gray-500 mt-1">Select a category first</p>
+                    )}
                   </div>
                 </div>
                 
@@ -654,6 +836,7 @@ const AddProductPage = () => {
                       <option value="">Select Bundle Type</option>
                       <option value="sameSizeDifferentColors">Same Size, Different Colors</option>
                       <option value="differentSizesSameColor">Different Sizes, Same Color</option>
+                      <option value="mixedSizeMixedColor">Mixed Size, Mixed Color</option>
                     </select>
                   </div>
 
@@ -715,6 +898,151 @@ const AddProductPage = () => {
                     </p>
                   </div>
                 </div>
+
+                {/* Same Size Different Colors Configuration */}
+                {formData.bundleType === 'sameSizeDifferentColors' && formData.colors && (
+                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                    <h4 className="font-medium text-green-800 mb-3">🎨 Same Size, Different Colors Configuration</h4>
+                    <p className="text-sm text-green-700 mb-3">
+                      Set quantity for each color:
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {formData.colors.split(',').filter(c => c.trim()).map(color => {
+                        const key = `color-${color.trim()}`;
+                        return (
+                          <div key={key} className="bg-white p-2 rounded border">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              {color.trim()}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                              onChange={(e) => {
+                                const newConfig = [...mixedBundleConfig];
+                                const existingIndex = newConfig.findIndex(item => item.key === key);
+                                const quantity = parseInt(e.target.value) || 0;
+                                
+                                if (existingIndex >= 0) {
+                                  newConfig[existingIndex] = { 
+                                    key, 
+                                    color: color.trim(), 
+                                    quantity 
+                                  };
+                                } else {
+                                  newConfig.push({ 
+                                    key, 
+                                    color: color.trim(), 
+                                    quantity 
+                                  });
+                                }
+                                setMixedBundleConfig(newConfig);
+                              }}
+                              value={mixedBundleConfig.find(item => item.key === key)?.quantity || ''}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    <div className="mt-3 text-sm text-green-700">
+                      <strong>Total Quantity: </strong>
+                      {mixedBundleConfig.reduce((sum, item) => sum + item.quantity, 0)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Different Sizes Same Color Configuration */}
+                {formData.bundleType === 'differentSizesSameColor' && formData.sizes && (
+                  <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                    <h4 className="font-medium text-purple-800 mb-3">📏 Different Sizes, Same Color Configuration</h4>
+                    <p className="text-sm text-purple-700 mb-3">
+                      Set quantity for each size:
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {formData.sizes.split(',').filter(s => s.trim()).map(size => {
+                        const key = `size-${size.trim()}`;
+                        return (
+                          <div key={key} className="bg-white p-2 rounded border">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              {size.trim()}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                              onChange={(e) => {
+                                const newConfig = [...mixedBundleConfig];
+                                const existingIndex = newConfig.findIndex(item => item.key === key);
+                                const quantity = parseInt(e.target.value) || 0;
+                                
+                                if (existingIndex >= 0) {
+                                  newConfig[existingIndex] = { 
+                                    key, 
+                                    size: size.trim(), 
+                                    quantity 
+                                  };
+                                } else {
+                                  newConfig.push({ 
+                                    key, 
+                                    size: size.trim(), 
+                                    quantity 
+                                  });
+                                }
+                                setMixedBundleConfig(newConfig);
+                              }}
+                              value={mixedBundleConfig.find(item => item.key === key)?.quantity || ''}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    <div className="mt-3 text-sm text-purple-700">
+                      <strong>Total Quantity: </strong>
+                      {mixedBundleConfig.reduce((sum, item) => sum + item.quantity, 0)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Mixed Bundle Configuration */}
+                {formData.bundleType === 'mixedSizeMixedColor' && formData.sizes && formData.colors && (
+                  <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                    <h4 className="font-medium text-yellow-800 mb-3">⚙️ Mixed Bundle Configuration</h4>
+                    <p className="text-sm text-yellow-700 mb-3">
+                      This bundle will create products for all size-color combinations using the total quantity specified above.
+                    </p>
+                    
+                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                      {formData.sizes.split(',').filter(s => s.trim()).map(size => 
+                        formData.colors.split(',').filter(c => c.trim()).map(color => (
+                          <div key={`${size.trim()}-${color.trim()}`} className="bg-white p-2 rounded border text-center">
+                            <div className="text-xs font-medium text-gray-700">
+                              {size.trim()}
+                            </div>
+                            <div className="text-xs text-gray-600">
+                              {color.trim()}
+                            </div>
+                          </div>
+                        ))
+                      ).flat()}
+                    </div>
+                    
+                    <div className="mt-3 text-sm text-yellow-700">
+                      <strong>Total Combinations: </strong>
+                      {formData.sizes.split(',').filter(s => s.trim()).length * formData.colors.split(',').filter(c => c.trim()).length} variants
+                    </div>
+                    
+                    <div className="mt-2 text-sm text-yellow-700">
+                      <strong>Total Quantity: </strong>
+                      {formData.quantity} items (will be distributed across all variants)
+                    </div>
+                  </div>
+                )}
 
                 {/* Bundle Distribution Preview */}
                 {formData.bundleType && formData.quantity && (formData.sizes || formData.colors) && (

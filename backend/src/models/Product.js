@@ -33,6 +33,10 @@ const productSchema = new mongoose.Schema({
     ref: 'Category',
     required: [true, 'Please add category']
   },
+  subcategory: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category'
+  },
   vendor: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Vendor',
@@ -91,6 +95,16 @@ const productSchema = new mongoose.Schema({
         type: Number,
         default: 0 // Price difference for variants (+ or - from base price)
       },
+      // Custom quantities configuration
+      mixedConfig: [{
+        key: String, // e.g., "color-Red", "size-M"
+        color: String,
+        size: String,
+        quantity: {
+          type: Number,
+          default: 0
+        }
+      }],
       // Advanced configuration
       generateBarcodes: {
         type: Boolean,
@@ -141,30 +155,25 @@ const productSchema = new mongoose.Schema({
     }
   },
   pricing: {
-    costPrice: {
+    factoryPrice: {
       type: Number,
-      required: [true, 'Please add cost price'],
-      min: [0, 'Cost price cannot be negative']
+      required: [true, 'Please add factory price'],
+      min: [0, 'Factory price cannot be negative']
     },
-    sellingPrice: {
+    offerPrice: {
       type: Number,
-      required: [true, 'Please add selling price'],
-      min: [0, 'Selling price cannot be negative']
+      required: [true, 'Please add offer price'],
+      min: [0, 'Offer price cannot be negative']
+    },
+    discountedPrice: {
+      type: Number,
+      required: [true, 'Please add discounted price'],
+      min: [0, 'Discounted price cannot be negative']
     },
     mrp: {
       type: Number,
       required: [true, 'Please add MRP'],
       min: [0, 'MRP cannot be negative']
-    },
-    discount: {
-      type: Number,
-      default: 0,
-      min: [0, 'Discount cannot be negative'],
-      max: [100, 'Discount cannot exceed 100%']
-    },
-    wholesalePrice: {
-      type: Number,
-      min: [0, 'Wholesale price cannot be negative']
     }
   },
   inventory: {
@@ -263,7 +272,7 @@ productSchema.index({ category: 1 });
 productSchema.index({ vendor: 1 });
 productSchema.index({ type: 1 });
 productSchema.index({ parentProduct: 1 });
-productSchema.index({ 'pricing.sellingPrice': 1 });
+productSchema.index({ 'pricing.offerPrice': 1 });
 productSchema.index({ 'inventory.currentStock': 1 });
 productSchema.index({ isActive: 1 });
 productSchema.index({ isComboEligible: 1 });
@@ -377,8 +386,8 @@ productSchema.methods.calculateCheckDigit = function(code) {
 
 // Virtual for profit margin
 productSchema.virtual('profitMargin').get(function() {
-  if (this.pricing.costPrice === 0) return 0;
-  return ((this.pricing.sellingPrice - this.pricing.costPrice) / this.pricing.costPrice * 100).toFixed(2);
+  if (this.pricing.factoryPrice === 0) return 0;
+  return ((this.pricing.offerPrice - this.pricing.factoryPrice) / this.pricing.factoryPrice * 100).toFixed(2);
 });
 
 // Virtual for stock status
@@ -428,101 +437,121 @@ productSchema.methods.createChildProducts = async function(userId) {
     throw new Error('Only parent bundle products can create children');
   }
   
+  // Critical check: ensure parent has an ID
+  if (!this._id) {
+    throw new Error('Parent product must be saved before creating children - no _id found');
+  }
+  
   const childProducts = [];
   const config = this.bundle.bundleConfig || {};
   
-  // Debug logging
-  console.log('Creating child products for bundle:');
-  console.log('Bundle Type:', this.bundle.bundleType);
-  console.log('Bundle Config:', JSON.stringify(config, null, 2));
-  console.log('Bundle Size:', this.bundle.bundleSize);
-  console.log('Parent Inventory:', this.inventory.currentStock);
-  
   // Generate variants based on bundle type
   let variants = [];
+  let parentQuantity = 0;
   
-  switch (this.bundle.bundleType) {
-    case 'same_size_different_colors':
-      // Same size, different colors - create variants for all colors
-      const baseSize = config.baseSize || (config.sizes && config.sizes[0]) || 'M';
-      const colors = config.colors || ['Red', 'Blue', 'Green'];
-      // Create variants for all colors except the first one (parent will be first color)
-      variants = colors.slice(1).map((color, index) => ({
-        size: baseSize,
-        color: color,
-        name: `${this.name} - ${baseSize} - ${color}`
-      }));
-      break;
-      
-    case 'different_sizes_same_color':
-      // Different sizes, same color - create variants for all sizes
-      const baseColor = config.baseColor || (config.colors && config.colors[0]) || 'Black';
-      const sizes = config.sizes || ['S', 'M', 'L', 'XL'];
-      // Create variants for all sizes except the first one (parent will be first size)
-      variants = sizes.slice(1).map((size, index) => ({
-        size: size,
-        color: baseColor,
-        name: `${this.name} - ${size} - ${baseColor}`
-      }));
-      break;
-      
-    case 'different_sizes_different_colors':
-      // All combinations of sizes and colors
-      const allSizes = config.sizes || ['S', 'M', 'L'];
-      const allColors = config.colors || ['Red', 'Blue'];
-      allSizes.forEach(size => {
-        allColors.forEach(color => {
-          variants.push({
-            size: size,
-            color: color,
-            name: `${this.name} - ${size} - ${color}`
-          });
-        });
-      });
-      break;
-      
-    default:
-      // If we have sizes or colors in config, use them instead of defaults
-      if (config.sizes && config.sizes.length > 1) {
-        // Use sizes
-        const sizes = config.sizes;
-        const baseColor = config.baseColor || (config.colors && config.colors[0]) || 'Default';
-        variants = sizes.slice(1).map((size, index) => ({
-          size: size,
-          color: baseColor,
-          name: `${this.name} - ${size} - ${baseColor}`
-        }));
-      } else if (config.colors && config.colors.length > 1) {
-        // Use colors
-        const colors = config.colors;
-        const baseSize = config.baseSize || (config.sizes && config.sizes[0]) || 'Standard';
-        variants = colors.slice(1).map((color, index) => ({
-          size: baseSize,
-          color: color,
-          name: `${this.name} - ${baseSize} - ${color}`
-        }));
-      } else {
-        // Fallback to numbered variants
-        const targetCount = Math.min(this.bundle.bundleSize - 1, 99);
-        for (let i = 1; i <= targetCount; i++) {
-          variants.push({
-            size: 'Standard',
-            color: 'Default',
-            name: `${this.name} - Item ${i.toString().padStart(2, '0')}`
-          });
-        }
-      }
+  // For mixed size mixed color, we don't require mixedConfig - use equal distribution
+  // For other bundle types, require custom quantities
+  if (this.bundle.bundleType !== 'different_sizes_different_colors' && (!config.mixedConfig || config.mixedConfig.length === 0)) {
+    throw new Error('Bundle creation requires custom quantities in mixedConfig for this bundle type.');
   }
   
-  // Limit variants to bundleSize - 1
-  variants = variants.slice(0, this.bundle.bundleSize - 1);
+  // Handle different bundle types
+  if (this.bundle.bundleType === 'different_sizes_different_colors' && (!config.mixedConfig || config.mixedConfig.length === 0)) {
+    // For mixed size mixed color, parent keeps all quantity, children are reference variants only
+    const allSizes = config.sizes || ['S', 'M', 'L'];
+    const allColors = config.colors || ['Red', 'Blue'];
+    const totalStock = this.inventory.currentStock || 0;
+    
+    parentQuantity = totalStock; // Parent keeps all quantity
+    
+    allSizes.forEach(size => {
+      allColors.forEach(color => {
+        variants.push({
+          size: size,
+          color: color,
+          name: `${this.name} - ${size} - ${color}`,
+          customQuantity: 0 // Children have 0 quantity - they're just reference variants
+        });
+      });
+    });
+  } else {
+    // Process each item in mixedConfig
+    const mixedItems = config.mixedConfig;
+    
+    switch (this.bundle.bundleType) {
+      case 'same_size_different_colors':
+        const baseColor = config.baseColor || (config.colors && config.colors[0]) || 'Red';
+        const baseSize = config.baseSize || (config.sizes && config.sizes[0]) || 'M';
+        
+        // Find parent quantity (base color)
+        const parentColorItem = mixedItems.find(item => item.color === baseColor);
+        parentQuantity = parentColorItem ? parentColorItem.quantity : 0;
+        
+        // Create variants for non-base colors
+        mixedItems.forEach(item => {
+          if (item.color !== baseColor && item.quantity > 0) {
+            variants.push({
+              size: baseSize,
+              color: item.color,
+              name: `${this.name} - ${baseSize} - ${item.color}`,
+              customQuantity: item.quantity
+            });
+          }
+        });
+        break;
+        
+      case 'different_sizes_same_color':
+        const baseSize2 = config.baseSize || (config.sizes && config.sizes[0]) || 'M';
+        const baseColor2 = config.baseColor || (config.colors && config.colors[0]) || 'Black';
+        
+        // Find parent quantity (base size)
+        const parentSizeItem = mixedItems.find(item => item.size === baseSize2);
+        parentQuantity = parentSizeItem ? parentSizeItem.quantity : 0;
+        
+        // Create variants for non-base sizes
+        mixedItems.forEach(item => {
+          if (item.size !== baseSize2 && item.quantity > 0) {
+            variants.push({
+              size: item.size,
+              color: baseColor2,
+              name: `${this.name} - ${item.size} - ${baseColor2}`,
+              customQuantity: item.quantity
+            });
+          }
+        });
+        break;
+        
+      case 'different_sizes_different_colors':
+        // For this type with mixedConfig, all items become children, parent gets 0
+        parentQuantity = 0;
+        mixedItems.forEach(item => {
+          if (item.quantity > 0) {
+            variants.push({
+              size: item.size,
+              color: item.color,
+              name: `${this.name} - ${item.size} - ${item.color}`,
+              customQuantity: item.quantity
+            });
+          }
+        });
+        break;
+        
+      default:
+        throw new Error(`Unsupported bundle type: ${this.bundle.bundleType}`);
+    }
+  }
+  
+  // Limit variants to bundleSize - 1 (if bundleSize is specified)
+  if (this.bundle.bundleSize && variants.length > this.bundle.bundleSize - 1) {
+    variants = variants.slice(0, this.bundle.bundleSize - 1);
+  }
   
   // Create child products
   for (let i = 0; i < variants.length; i++) {
     const variant = variants[i];
     const childData = {
       name: variant.name,
-      code: `${this.code}/${(i + 1).toString().padStart(2, '0')}`, // Generate child code
+      code: `${this.code}/${(i + 1).toString().padStart(2, '0')}`,
       barcode: this.barcode ? `${this.barcode}${(i + 1).toString().padStart(2, '0')}` : undefined,
       type: 'child',
       parentProduct: this._id,
@@ -545,23 +574,19 @@ productSchema.methods.createChildProducts = async function(userId) {
       createdBy: userId
     };
     
-    // Inherit properties based on configuration
-    if (childData.childConfig?.inheritFromParent?.pricing !== false) {
-      const priceAdjustment = config.priceVariation || 0;
-      childData.pricing = {
-        costPrice: this.pricing.costPrice + priceAdjustment,
-        sellingPrice: this.pricing.sellingPrice + priceAdjustment,
-        mrp: this.pricing.mrp + priceAdjustment,
-        discount: this.pricing.discount || 0,
-        wholesalePrice: (this.pricing.wholesalePrice || this.pricing.sellingPrice * 0.9) + priceAdjustment
-      };
-    }
+    // Inherit pricing
+    const priceAdjustment = config.priceVariation || 0;
+    childData.pricing = {
+      factoryPrice: this.pricing.factoryPrice + priceAdjustment,
+      offerPrice: this.pricing.offerPrice + priceAdjustment,
+      discountedPrice: this.pricing.discountedPrice + priceAdjustment,
+      mrp: this.pricing.mrp + priceAdjustment
+    };
     
-    // Always set specifications for child products with variant details
+    // Set specifications with variant details
     const parentSpecs = this.specifications || {};
     childData.specifications = { 
       weight: parentSpecs.weight,
-      dimensions: parentSpecs.dimensions || undefined, // Don't set if undefined
       color: variant.color,
       size: variant.size,
       material: parentSpecs.material,
@@ -570,25 +595,25 @@ productSchema.methods.createChildProducts = async function(userId) {
       warrantyPeriod: parentSpecs.warrantyPeriod
     };
     
-    // Remove undefined fields to avoid validation errors
+    // Add dimensions only if it exists
+    if (parentSpecs.dimensions && Object.keys(parentSpecs.dimensions).length > 0) {
+      childData.specifications.dimensions = parentSpecs.dimensions;
+    }
+    
+    // Remove undefined fields
     Object.keys(childData.specifications).forEach(key => {
       if (childData.specifications[key] === undefined) {
         delete childData.specifications[key];
       }
     });
     
-    if (childData.childConfig?.inheritFromParent?.gst !== false) {
-      childData.hsnCode = this.hsnCode;
-      childData.gstRate = this.gstRate;
-    }
+    // Inherit GST details
+    childData.hsnCode = this.hsnCode;
+    childData.gstRate = this.gstRate;
     
-    // Set initial inventory with proper quantity distribution
-    const totalQuantity = this.inventory.currentStock || 0; // Use parent's current stock as total
-    const totalVariants = variants.length + 1; // +1 for parent
-    const variantQuantity = Math.floor(totalQuantity / totalVariants);
-    
+    // Set inventory with the custom quantity
     childData.inventory = {
-      currentStock: variantQuantity,
+      currentStock: variant.customQuantity,
       minStockLevel: this.inventory.minStockLevel,
       maxStockLevel: this.inventory.maxStockLevel,
       reorderPoint: this.inventory.reorderPoint,
@@ -606,75 +631,41 @@ productSchema.methods.createChildProducts = async function(userId) {
     childProducts.push(childProduct);
   }
   
-  // Update parent's children count and adjust parent stock
+  // Update parent product
   this.bundle.childrenCount = childProducts.length;
-  
-  // Set parent's stock to the calculated parent quantity
-  const totalQuantity = this.inventory.currentStock || 0; // Use parent's current stock as total
-  const totalVariants = variants.length + 1; // +1 for parent
-  const variantQuantity = Math.floor(totalQuantity / totalVariants);
-  const parentQuantity = totalQuantity - (variantQuantity * variants.length); // Parent gets remainder
-  
-  console.log('=== QUANTITY DISTRIBUTION DEBUG ===');
-  console.log('Total Quantity:', totalQuantity);
-  console.log('Total Variants (including parent):', totalVariants);
-  console.log('Quantity per variant:', variantQuantity);
-  console.log('Children count:', variants.length);
-  console.log('Parent quantity (remainder):', parentQuantity);
-  console.log('=== END QUANTITY DEBUG ===');
-  
   this.inventory.currentStock = parentQuantity;
   
-  // Set parent's specifications to match the first variant (if available)
+  // Set parent's specifications to include variant details
   if (config.sizes && config.sizes.length > 0 && config.colors && config.colors.length > 0) {
-    // Ensure specifications object exists and handle dimensions properly
     const currentSpecs = this.specifications || {};
     
+    // Determine parent variant based on bundle type
+    let parentSize, parentColor;
+    
     if (this.bundle.bundleType === 'same_size_different_colors') {
-      // For same size different colors, parent should have the base size and first color
-      this.specifications = {
-        weight: currentSpecs.weight,
-        material: currentSpecs.material,
-        brand: currentSpecs.brand,
-        model: currentSpecs.model,
-        warrantyPeriod: currentSpecs.warrantyPeriod,
-        size: config.baseSize || config.sizes[0],
-        color: config.colors[0]
-      };
-      // Only add dimensions if it exists and is not empty
-      if (currentSpecs.dimensions && Object.keys(currentSpecs.dimensions).length > 0) {
-        this.specifications.dimensions = currentSpecs.dimensions;
-      }
+      parentSize = config.baseSize || config.sizes[0];
+      parentColor = config.baseColor || config.colors[0];
     } else if (this.bundle.bundleType === 'different_sizes_same_color') {
-      // For different sizes same color, parent should have first size and base color
-      this.specifications = {
-        weight: currentSpecs.weight,
-        material: currentSpecs.material,
-        brand: currentSpecs.brand,
-        model: currentSpecs.model,
-        warrantyPeriod: currentSpecs.warrantyPeriod,
-        size: config.sizes[0],
-        color: config.baseColor || config.colors[0]
-      };
-      // Only add dimensions if it exists and is not empty
-      if (currentSpecs.dimensions && Object.keys(currentSpecs.dimensions).length > 0) {
-        this.specifications.dimensions = currentSpecs.dimensions;
-      }
+      parentSize = config.baseSize || config.sizes[0];
+      parentColor = config.baseColor || config.colors[0];
     } else {
-      // Default case - use first available values
-      this.specifications = {
-        weight: currentSpecs.weight,
-        material: currentSpecs.material,
-        brand: currentSpecs.brand,
-        model: currentSpecs.model,
-        warrantyPeriod: currentSpecs.warrantyPeriod,
-        size: config.sizes[0] || 'Standard',
-        color: config.colors[0] || 'Default'
-      };
-      // Only add dimensions if it exists and is not empty
-      if (currentSpecs.dimensions && Object.keys(currentSpecs.dimensions).length > 0) {
-        this.specifications.dimensions = currentSpecs.dimensions;
-      }
+      parentSize = config.sizes[0] || 'Standard';
+      parentColor = config.colors[0] || 'Default';
+    }
+    
+    this.specifications = {
+      weight: currentSpecs.weight,
+      material: currentSpecs.material,
+      brand: currentSpecs.brand,
+      model: currentSpecs.model,
+      warrantyPeriod: currentSpecs.warrantyPeriod,
+      size: parentSize,
+      color: parentColor
+    };
+    
+    // Add dimensions only if it exists and is not empty
+    if (currentSpecs.dimensions && Object.keys(currentSpecs.dimensions).length > 0) {
+      this.specifications.dimensions = currentSpecs.dimensions;
     }
   }
   
@@ -738,11 +729,11 @@ productSchema.methods.getBundleSummary = async function() {
   }
   
   const childProducts = await this.constructor.find({ parentProduct: this._id })
-    .select('name code barcode inventory.currentStock pricing.sellingPrice isActive');
+    .select('name code barcode inventory.currentStock pricing.offerPrice isActive');
   
   const totalStock = childProducts.reduce((sum, child) => sum + child.inventory.currentStock, 0);
   const totalValue = childProducts.reduce((sum, child) => 
-    sum + (child.inventory.currentStock * child.pricing.sellingPrice), 0);
+    sum + (child.inventory.currentStock * child.pricing.offerPrice), 0);
   
   return {
     parentProduct: {
@@ -757,7 +748,7 @@ productSchema.methods.getBundleSummary = async function() {
       code: child.code,
       barcode: child.barcode,
       stock: child.inventory.currentStock,
-      value: child.inventory.currentStock * child.pricing.sellingPrice,
+      value: child.inventory.currentStock * child.pricing.offerPrice,
       isActive: child.isActive
     })),
     summary: {
@@ -765,7 +756,7 @@ productSchema.methods.getBundleSummary = async function() {
       expectedChildren: this.bundle.bundleSize - 1,
       isComplete: childProducts.length === (this.bundle.bundleSize - 1),
       totalStock: totalStock + this.inventory.currentStock,
-      totalValue: totalValue + (this.inventory.currentStock * this.pricing.sellingPrice),
+      totalValue: totalValue + (this.inventory.currentStock * this.pricing.offerPrice),
       activeChildren: childProducts.filter(child => child.isActive).length
     }
   };
@@ -802,15 +793,20 @@ productSchema.statics.createBundleWithChildren = async function(bundleData, user
     createdBy: userId
   };
   
-  const parentProduct = new this(parentData);
-  await parentProduct.save();
-  
-  // Auto-generate children if requested
-  if (parentProduct.bundle.autoGenerateChildren) {
-    await parentProduct.createChildProducts(userId);
+  try {
+    const parentProduct = new this(parentData);
+    await parentProduct.save();
+    
+    // Auto-generate children if requested
+    if (parentProduct.bundle.autoGenerateChildren) {
+      await parentProduct.createChildProducts(userId);
+    }
+    
+    return parentProduct;
+  } catch (error) {
+    console.error('Error creating parent product:', error);
+    throw error;
   }
-  
-  return parentProduct;
 };
 
 // Static method to get all bundles
@@ -855,7 +851,7 @@ productSchema.statics.getBundleAnalytics = function() {
         },
         totalBundleValue: {
           $sum: {
-            $multiply: ['$inventory.currentStock', '$pricing.sellingPrice']
+            $multiply: ['$inventory.currentStock', '$pricing.offerPrice']
           }
         }
       }

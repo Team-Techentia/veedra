@@ -1,314 +1,167 @@
 const mongoose = require('mongoose');
 
 const comboSchema = new mongoose.Schema({
+  // Basic Information
+  sku: {
+    type: String,
+    required: true,
+    unique: true,
+    uppercase: true
+  },
   name: {
     type: String,
     required: [true, 'Combo name is required'],
     trim: true,
     maxlength: [100, 'Combo name cannot exceed 100 characters']
   },
-  code: {
+  type: {
     type: String,
-    required: function() {
-      return !this.isNew;
-    },
-    unique: true,
-    uppercase: true
+    enum: ['outfit', 'clearance', 'festive', 'family', 'kids', 'accessory', 'custom'],
+    default: 'outfit'
   },
-  description: {
+  colorTag: {
     type: String,
-    maxlength: [500, 'Description cannot exceed 500 characters']
-  },
-  
-  // Combo Status
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  isPaused: {
-    type: Boolean,
-    default: false
-  },
-  
-  // Price Slots Configuration - Key Feature for E-commerce
-  priceSlots: [{
-    slotName: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    minPrice: {
-      type: Number,
-      required: true,
-      min: [0, 'Min price cannot be negative']
-    },
-    maxPrice: {
-      type: Number,
-      required: true,
-      min: [0, 'Max price cannot be negative']
-    },
-    maxProducts: {
-      type: Number,
-      default: 10,
-      min: [1, 'Max products must be at least 1']
-    },
-    priority: {
-      type: Number,
-      default: 1,
-      min: [1, 'Priority must be at least 1']
-    },
-    isActive: {
-      type: Boolean,
-      default: true
-    }
-  }],
-  
-  // Combo Rules
-  rules: {
-    totalProducts: {
-      min: {
-        type: Number,
-        default: 2,
-        min: [2, 'Minimum 2 products required for combo']
-      },
-      max: {
-        type: Number,
-        default: 10,
-        min: [2, 'Maximum products must be at least 2']
-      }
-    },
-    allowDuplicates: {
-      type: Boolean,
-      default: false
-    },
-    requireAllSlots: {
-      type: Boolean,
-      default: false
-    },
-    minimumValue: {
-      type: Number,
-      default: 0,
-      min: [0, 'Minimum value cannot be negative']
-    },
-    maximumValue: {
-      type: Number,
-      default: 999999,
-      min: [0, 'Maximum value cannot be negative']
-    }
-  },
-  
-  // Discount Configuration
-  discountType: {
-    type: String,
-    enum: ['percentage', 'fixed', 'buy_x_get_y'],
-    default: 'percentage'
-  },
-  discountValue: {
-    type: Number,
-    required: true,
-    min: [0, 'Discount value cannot be negative']
-  },
-  maxDiscount: {
-    type: Number,
-    min: [0, 'Max discount cannot be negative']
+    enum: ['Blue', 'Green', 'Orange', 'Pink', 'Yellow', 'Purple', 'Red'],
+    default: 'Blue'
   },
   
   // Validity Period
   validFrom: {
     type: Date,
-    default: Date.now
+    default: null
   },
-  validUntil: {
-    type: Date
+  validTo: {
+    type: Date,
+    default: null
   },
   
-  // Auto-Assignment Settings - Prevent high-value products in low-value slots
-  autoAssignment: {
-    enabled: {
+  // Pricing
+  offerPrice: {
+    type: Number,
+    required: true,
+    min: [0, 'Offer price cannot be negative']
+  },
+  qtyProducts: {
+    type: Number,
+    required: true,
+    min: [1, 'Quantity of products must be at least 1']
+  },
+  
+  // Notes
+  notes: {
+    type: String,
+    maxlength: [1000, 'Notes cannot exceed 1000 characters'],
+    default: ''
+  },
+  
+  // Rules Configuration
+  rules: {
+    allowMix: {
       type: Boolean,
       default: true
     },
-    preventHighValueInLowSlot: {
-      type: Boolean,
-      default: true
-    },
-    allowPriceAdjustment: {
-      type: Boolean,
-      default: false
-    }
-  },
-  
-  // Eligible Categories and Vendors
-  eligibleCategories: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Category'
-  }],
-  eligibleVendors: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Vendor'
-  }],
-  
-  // Applicable Products (for specific product combos)
-  applicableProducts: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product'
-  }],
-  
-  // Excluded Products
-  excludedProducts: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product'
-  }],
-  
-  // Usage Limits
-  usageLimits: {
-    totalUsage: {
+    minItems: {
       type: Number,
-      default: null
-    },
-    usageCount: {
-      type: Number,
-      default: 0
-    }
-  },
-  
-  // Analytics
-  analytics: {
-    totalRevenue: {
-      type: Number,
+      min: [0, 'Min items cannot be negative'],
       default: 0
     },
-    totalSavings: {
+    maxItems: {
       type: Number,
+      min: [0, 'Max items cannot be negative'],
       default: 0
     },
-    averageOrderValue: {
-      type: Number,
-      default: 0
-    }
+    slots: [{
+      minPrice: {
+        type: Number,
+        required: true,
+        min: [0, 'Min price cannot be negative']
+      },
+      maxPrice: {
+        type: Number,
+        required: true,
+        min: [0, 'Max price cannot be negative']
+      }
+    }]
   },
   
-  // Audit Fields
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: false
-  },
-  lastModifiedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  // Status
+  paused: {
+    type: Boolean,
+    default: false
   },
   
   // System Fields
-  sortOrder: {
-    type: Number,
-    default: 0
-  },
-  tags: [{
-    type: String,
-    trim: true,
-    lowercase: true
-  }]
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
 }, {
-  timestamps: true
+  timestamps: false // We're managing createdAt manually
 });
 
 // Indexes for better performance
-comboSchema.index({ code: 1 });
-comboSchema.index({ isActive: 1 });
-comboSchema.index({ isPaused: 1 });
-comboSchema.index({ validFrom: 1, validUntil: 1 });
-comboSchema.index({ sortOrder: 1 });
+comboSchema.index({ sku: 1 });
+comboSchema.index({ type: 1 });
+comboSchema.index({ paused: 1 });
+comboSchema.index({ validFrom: 1, validTo: 1 });
 
-// Generate combo code
+// Generate combo SKU
 comboSchema.pre('save', function(next) {
-  if (this.isNew && !this.code) {
-    const timestamp = Date.now().toString().slice(-6);
-    this.code = `CMB${timestamp}`;
+  if (this.isNew && !this.sku) {
+    // Auto-generate SKU similar to the JavaScript version
+    const seq = Math.floor(Math.random() * 9999).toString().padStart(4, '0');
+    this.sku = `CMB-${seq}`;
   }
   next();
 });
 
-// Method to check if combo is currently valid
-comboSchema.methods.isCurrentlyValid = function() {
-  const now = new Date();
+// Method to check combo status
+comboSchema.methods.getStatus = function() {
+  if (this.paused) return 'paused';
   
-  if (!this.isActive || this.isPaused) return false;
+  const today = new Date();
+  const start = this.validFrom ? new Date(this.validFrom) : null;
+  const end = this.validTo ? new Date(this.validTo) : null;
   
-  if (this.validFrom && now < this.validFrom) return false;
-  if (this.validUntil && now > this.validUntil) return false;
+  if (start && today < start) return 'upcoming';
+  if (end && today > end) return 'expired';
   
-  if (this.usageLimits.totalUsage && this.usageLimits.usageCount >= this.usageLimits.totalUsage) {
-    return false;
-  }
-  
-  return true;
+  return 'active';
 };
 
-// Method to find appropriate slot for a product price
-comboSchema.methods.findSlotForPrice = function(price) {
-  const activeSlots = this.priceSlots.filter(slot => slot.isActive);
-  const sortedSlots = activeSlots.sort((a, b) => b.priority - a.priority);
+// Method to compute slot bands for price calculations
+comboSchema.methods.computeSlotBands = function() {
+  const slots = this.rules?.slots || [];
+  let minMRP = 0, maxMRP = 0;
+  let totalQty = slots.length || 0;
   
-  for (let slot of sortedSlots) {
-    if (price >= slot.minPrice && price <= slot.maxPrice) {
-      return slot;
-    }
+  for (const slot of slots) {
+    minMRP += slot.minPrice || 0;
+    maxMRP += slot.maxPrice || 0;
   }
   
-  return null;
-};
-
-// Method to validate if product can be assigned to slot (prevent high-value in low slot)
-comboSchema.methods.canAssignToSlot = function(productPrice, slot) {
-  if (!this.autoAssignment.preventHighValueInLowSlot) return true;
+  const minAt15 = Math.round(minMRP * 0.85); // 15% discount assumption
+  const maxAt15 = Math.round(maxMRP * 0.85);
   
-  // Find if there are higher value slots available
-  const higherSlots = this.priceSlots.filter(s => 
-    s.isActive && s.minPrice > slot.maxPrice
-  );
-  
-  // If product price is significantly higher than slot max, prevent assignment
-  const priceBuffer = slot.maxPrice * 0.2; // 20% buffer
-  if (productPrice > (slot.maxPrice + priceBuffer) && higherSlots.length > 0) {
-    return false;
-  }
-  
-  return true;
+  return { minMRP, maxMRP, minAt15, maxAt15, totalQty };
 };
 
 // Static method to get active combos
 comboSchema.statics.getActiveCombos = function() {
   const now = new Date();
   return this.find({
-    isActive: true,
-    isPaused: false,
+    paused: false,
     $or: [
       { validFrom: { $lte: now } },
-      { validFrom: { $exists: false } }
+      { validFrom: { $exists: false } },
+      { validFrom: null }
     ],
     $or: [
-      { validUntil: { $gte: now } },
-      { validUntil: { $exists: false } }
+      { validTo: { $gte: now } },
+      { validTo: { $exists: false } },
+      { validTo: null }
     ]
-  }).sort({ sortOrder: 1, createdAt: -1 });
-};
-
-// Static method to get combo statistics
-comboSchema.statics.getComboStats = function() {
-  return this.aggregate([
-    {
-      $group: {
-        _id: null,
-        totalCombos: { $sum: 1 },
-        activeCombos: { $sum: { $cond: [{ $eq: ['$isActive', true] }, 1, 0] } },
-        pausedCombos: { $sum: { $cond: [{ $eq: ['$isPaused', true] }, 1, 0] } },
-        totalRevenue: { $sum: '$analytics.totalRevenue' },
-        totalSavings: { $sum: '$analytics.totalSavings' },
-        avgOrderValue: { $avg: '$analytics.averageOrderValue' }
-      }
-    }
-  ]);
+  }).sort({ createdAt: -1 });
 };
 
 module.exports = mongoose.model('Combo', comboSchema);

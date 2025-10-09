@@ -17,6 +17,7 @@ const getProducts = asyncHandler(async (req, res) => {
   
   const products = await Product.find(query)
     .populate('category', 'name')
+    .populate('subcategory', 'name')
     .populate('vendor', 'name')
     .limit(limit * 1)
     .skip((page - 1) * limit)
@@ -42,6 +43,7 @@ const getProducts = asyncHandler(async (req, res) => {
 const getProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id)
     .populate('category')
+    .populate('subcategory')
     .populate('vendor')
     .populate('childProducts');
   
@@ -61,10 +63,6 @@ const getProduct = asyncHandler(async (req, res) => {
 // @access  Private/Manager
 const createProduct = asyncHandler(async (req, res) => {
   try {
-    console.log('=== BACKEND RECEIVED DATA ===');
-    console.log('req.body.bundle:', JSON.stringify(req.body.bundle, null, 2));
-    console.log('=== END BACKEND DEBUG ===');
-    
     const productData = {
       ...req.body,
       createdBy: req.user.id
@@ -427,6 +425,7 @@ const scanProductByBarcode = asyncHandler(async (req, res) => {
       isActive: true 
     })
       .populate('category', 'name code')
+      .populate('subcategory', 'name code')
       .populate('vendor', 'name')
       .populate('parentProduct', 'name code bundle');
     
@@ -482,16 +481,17 @@ const getComboEligibleProducts = asyncHandler(async (req, res) => {
     
     if (priceRange) {
       const [min, max] = priceRange.split('-').map(Number);
-      query['pricing.sellingPrice'] = { $gte: min, $lte: max };
+      query['pricing.offerPrice'] = { $gte: min, $lte: max };
     }
     
     const products = await Product.find(query)
       .populate('category', 'name')
+      .populate('subcategory', 'name')
       .populate('vendor', 'name')
-      .select('name code barcode pricing inventory category vendor isComboEligible')
+      .select('name code barcode pricing inventory category subcategory vendor isComboEligible')
       .limit(limit * 1)
       .skip((page - 1) * limit)
-      .sort({ 'pricing.sellingPrice': 1 });
+      .sort({ 'pricing.offerPrice': 1 });
     
     const total = await Product.countDocuments(query);
     
