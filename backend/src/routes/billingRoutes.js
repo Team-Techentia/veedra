@@ -28,6 +28,7 @@ router.route('/:id')
 
 router.get('/:id/invoice', generateInvoice);
 router.get('/reports/daily', getDailySales);
+router.get('/reports/download', getDailySales);
 router.get('/reports/staff/:staffId', getStaffSales);
 
 module.exports = router;

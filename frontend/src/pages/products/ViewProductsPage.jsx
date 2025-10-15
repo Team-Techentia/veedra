@@ -14,7 +14,14 @@ const ViewProductsPage = () => {
   const [selectedProducts, setSelectedProducts] = useState(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const [productsPerPage] = useState(30);
+  const [stickerSize, setStickerSize] = useState('medium');
   const printRef = useRef();
+
+  // Get sticker dimensions based on selected size
+  const getStickerDimensions = (size) => {
+    // All sizes now use 3 inch × 2 inch (7.62cm × 5.08cm)
+    return { width: '7.62cm', height: '5.08cm', fontSize: '12px', barcodeHeight: '30' };
+  };
 
   useEffect(() => {
     loadProducts();
@@ -62,6 +69,10 @@ const ViewProductsPage = () => {
       const allDisplayProducts = [...enrichedParents, ...orphanedAsStandalone];
       setParentProducts(allDisplayProducts);
       setProducts(allProducts);
+      
+      // Clear expanded bundles state to ensure all bundles are collapsed after reload
+      setExpandedBundles(new Set());
+      
     } catch (error) {
       toast.error('Failed to load products');
     } finally {
@@ -297,47 +308,63 @@ const ViewProductsPage = () => {
     }
 
     const generateStickerHTML = (list) => {
+      const dimensions = getStickerDimensions(stickerSize);
+      
       const styles = `
         <style>
           body {
             display: flex;
             flex-wrap: wrap;
             font-family: Arial, sans-serif;
-            padding: 10px;
+            padding: 5mm;
+            margin: 0;
           }
           .sticker {
-            width: 6.3cm;
-            height: 4cm;
-            margin: 0.3cm;
-            padding: 0.4cm;
-            border-radius: 8px;
+            width: ${dimensions.width};
+            height: ${dimensions.height};
+            margin: 2mm;
+            padding: 3mm;
+            border: 2px solid #000;
             background: white;
-            box-shadow: 0 0 2px rgba(0,0,0,0.1);
             box-sizing: border-box;
-          }
-          .shop-name {
-            font-size: 14px;
-            font-weight: bold;
             display: flex;
+            flex-direction: column;
             justify-content: space-between;
+            page-break-inside: avoid;
           }
-          .brand-code {
-            font-size: 14px;
+          .brand-name {
+            font-size: ${parseInt(dimensions.fontSize) + 2}px;
             font-weight: bold;
-            background: linear-gradient(to right, #79c2ff, #a5f2c3);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            text-align: center;
+            margin-bottom: 2mm;
+            padding-bottom: 1mm;
           }
-          .info {
-            font-size: 12px;
-            margin-top: 4px;
+          .product-info {
+            font-size: ${parseInt(dimensions.fontSize) - 1}px;
+            line-height: 1.4;
+            flex: 1;
           }
-          .red-line {
-            border-top: 1px solid red;
-            margin: 4px 0;
+          .info-line {
+            margin-bottom: 1mm;
+            display: flex;
+            align-items: center;
+          }
+          .label {
+            font-weight: bold;
+            margin-right: 2mm;
+          }
+          .underline {
+            border-bottom: 1px solid #000;
+            flex: 1;
+            height: 1.2em;
+            display: inline-block;
+          }
+          .price-info {
+            margin: 2mm 0;
           }
           .barcode {
             text-align: center;
+            margin-top: auto;
           }
           .barcode svg {
             max-width: 100%;
@@ -345,35 +372,91 @@ const ViewProductsPage = () => {
           }
           .barcode-code {
             text-align: center;
-            font-size: 10px;
-            margin-top: 2px;
-            letter-spacing: 2px;
+            font-size: ${parseInt(dimensions.fontSize) - 2}px;
+            margin-top: 1mm;
             font-weight: bold;
+            letter-spacing: 1px;
           }
           @page {
             size: A4;
-            margin: 0.5cm;
+            margin: 5mm;
+          }
+          @media print {
+            body { margin: 0; padding: 2mm; }
+            .sticker { margin: 1mm; }
           }
         </style>
       `;
 
-      const body = list.map((p, i) => `
-        <div class="sticker">
-          <div class="shop-name">
-            <span>${p.vendor?.name || 'TATE The Brand'}</span>
-            <span class="brand-code">${p.vendor?.code || ''}</span>
-          </div>
-          <div class="info">
-            <div><strong>MRP:</strong> ₹${p.pricing?.mrp || 0}</div>
-            <div><strong>Discounted:</strong> ₹${p.pricing?.discountedPrice || 0}</div>
-          </div>
-          <div class="red-line"></div>
-          <div class="barcode">
-            <svg id="barcode-${i}"></svg>
-            <div class="barcode-code">${p.code}</div>
-          </div>
-        </div>
-      `).join("");
+      const body = list.map((p, i) => {
+        // Check if this is a combo product - check multiple possible fields
+        const isCombo = p.type === 'combo' || 
+                       p.comboType || 
+                       p.isCombo || 
+                       (p.rules && p.rules.slots) ||
+                       p.offerPrice ||
+                       (p.sku && p.sku.startsWith('CMB'));
+        
+        if (isCombo) {
+          // Combo sticker format
+          return `
+            <div class="sticker">
+              <div class="brand-name">VEEDRA THE BRAND</div>
+              <div class="product-info">
+                <div class="info-line">
+                  <span class="label">Name:</span>
+                  <span>${p.name || ''}</span>
+                </div>
+                <div class="info-line">
+                  <span class="label">SKU:</span>
+                  <span>${p.sku || p.code || 'CMB-0001'}</span>
+                </div>
+                <div class="info-line">
+                  <span class="label">Type:</span>
+                  <span>${p.comboType || p.type || ''}</span>
+                </div>
+                <div class="price-info">
+                  <div><strong>Price Slots:</strong> ${
+                    p.priceSlots || 
+                    (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
+                    '₹350–400 | ₹430–500 | ₹700–730'
+                  }</div>
+                  <div><strong>Combo Offer Price:</strong> ₹${p.offerPrice || p.pricing?.offerPrice || '999'}</div>
+                </div>
+              </div>
+              <div class="barcode">
+                <svg id="barcode-${i}"></svg>
+                <div class="barcode-code">Code: ${p.code}</div>
+              </div>
+            </div>
+          `;
+        } else {
+          // Regular product sticker format
+          return `
+            <div class="sticker">
+              <div class="brand-name">VEEDRA THE BRAND</div>
+              <div class="product-info">
+                <div class="info-line">
+                  <span class="label">Name:</span>
+                  <span>${p.name || ''}</span>
+                </div>
+                <div class="info-line">
+                  <span class="label">Category:</span>
+                  <span>${p.category?.name || ''}</span>
+                </div>
+                <div class="price-info">
+                  <div><strong>MRP:</strong> ₹${p.pricing?.mrp || '_________'}</div>
+                  <div><strong>Discounted Price (15% Off):</strong> ₹${p.pricing?.discountedPrice || '_________'}</div>
+                </div>
+              </div>
+              <div class="barcode">
+                <svg id="barcode-${i}"></svg>
+                <div class="barcode-code">Code: ${p.code}</div>
+              </div>
+            </div>
+          `;
+        }
+      }).join("");
 
       const scripts = `
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
@@ -381,9 +464,10 @@ const ViewProductsPage = () => {
           ${list.map((p, i) => `
             JsBarcode("#barcode-${i}", "${p.code}", {
               format: "CODE128",
-              width: 1.5,
-              height: 40,
-              displayValue: false
+              width: ${stickerSize === 'thermal' || stickerSize === 'large' ? '1' : '1.5'},
+              height: ${dimensions.barcodeHeight},
+              displayValue: false,
+              margin: 1
             });
           `).join("")}
           setTimeout(() => window.print(), 1000);
@@ -400,6 +484,14 @@ const ViewProductsPage = () => {
 
   const printSingleProduct = (product) => {
     const generateStickerHTML = (p) => {
+      const dimensions = getStickerDimensions(stickerSize);
+      const isCombo = p.type === 'combo' || 
+                     p.comboType || 
+                     p.isCombo || 
+                     (p.rules && p.rules.slots) ||
+                     p.offerPrice ||
+                     (p.sku && p.sku.startsWith('CMB'));
+      
       const styles = `
         <style>
           body {
@@ -407,41 +499,54 @@ const ViewProductsPage = () => {
             justify-content: center;
             align-items: center;
             font-family: Arial, sans-serif;
-            padding: 20px;
+            padding: 10mm;
             min-height: 100vh;
+            margin: 0;
           }
           .sticker {
-            width: 6.3cm;
-            height: 4cm;
-            padding: 0.4cm;
-            border-radius: 8px;
+            width: ${dimensions.width};
+            height: ${dimensions.height};
+            padding: 3mm;
+            border: 2px solid #000;
             background: white;
-            box-shadow: 0 0 2px rgba(0,0,0,0.1);
             box-sizing: border-box;
-          }
-          .shop-name {
-            font-size: 14px;
-            font-weight: bold;
             display: flex;
+            flex-direction: column;
             justify-content: space-between;
           }
-          .brand-code {
-            font-size: 14px;
+          .brand-name {
+            font-size: ${parseInt(dimensions.fontSize) + 2}px;
             font-weight: bold;
-            background: linear-gradient(to right, #79c2ff, #a5f2c3);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            text-align: center;
+            margin-bottom: 2mm;
+            padding-bottom: 1mm;
           }
-          .info {
-            font-size: 12px;
-            margin-top: 4px;
+          .product-info {
+            font-size: ${parseInt(dimensions.fontSize) - 1}px;
+            line-height: 1.4;
+            flex: 1;
           }
-          .red-line {
-            border-top: 1px solid red;
-            margin: 4px 0;
+          .info-line {
+            margin-bottom: 1mm;
+            display: flex;
+            align-items: center;
+          }
+          .label {
+            font-weight: bold;
+            margin-right: 2mm;
+          }
+          .underline {
+            border-bottom: 1px solid #000;
+            flex: 1;
+            height: 1.2em;
+            display: inline-block;
+          }
+          .price-info {
+            margin: 2mm 0;
           }
           .barcode {
             text-align: center;
+            margin-top: auto;
           }
           .barcode svg {
             max-width: 100%;
@@ -449,32 +554,71 @@ const ViewProductsPage = () => {
           }
           .barcode-code {
             text-align: center;
-            font-size: 10px;
-            margin-top: 2px;
-            letter-spacing: 2px;
+            font-size: ${parseInt(dimensions.fontSize) - 2}px;
+            margin-top: 1mm;
             font-weight: bold;
+            letter-spacing: 1px;
           }
           @page {
             size: A4;
-            margin: 0.5cm;
+            margin: 5mm;
+          }
+          @media print {
+            body { margin: 0; padding: 5mm; }
           }
         </style>
       `;
 
-      const body = `
+      const body = isCombo ? `
         <div class="sticker">
-          <div class="shop-name">
-            <span>${p.vendor?.name || 'TATE The Brand'}</span>
-            <span class="brand-code">${p.vendor?.code || ''}</span>
+          <div class="brand-name">VEEDRA THE BRAND</div>
+          <div class="product-info">
+            <div class="info-line">
+              <span class="label">Name:</span>
+              <span>${p.name || ''}</span>
+            </div>
+            <div class="info-line">
+              <span class="label">SKU:</span>
+              <span>${p.sku || p.code || 'CMB-0001'}</span>
+            </div>
+            <div class="info-line">
+              <span class="label">Type:</span>
+              <span>${p.comboType || p.type || ''}</span>
+            </div>
+            <div class="price-info">
+              <div><strong>Price Slots:</strong> ${
+                p.priceSlots || 
+                (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
+                '₹350–400 | ₹430–500 | ₹700–730'
+              }</div>
+              <div><strong>Combo Offer Price:</strong> ₹${p.offerPrice || p.pricing?.offerPrice || '999'}</div>
+            </div>
           </div>
-          <div class="info">
-            <div><strong>MRP:</strong> ₹${p.pricing?.mrp || 0}</div>
-            <div><strong>Discounted:</strong> ₹${p.pricing?.discountedPrice || 0}</div>
-          </div>
-          <div class="red-line"></div>
           <div class="barcode">
             <svg id="barcode-single"></svg>
-            <div class="barcode-code">${p.code}</div>
+            <div class="barcode-code">Code: ${p.code}</div>
+          </div>
+        </div>
+      ` : `
+        <div class="sticker">
+          <div class="brand-name">VEEDRA THE BRAND</div>
+          <div class="product-info">
+            <div class="info-line">
+              <span class="label">Name:</span>
+              <span>${p.name || ''}</span>
+            </div>
+            <div class="info-line">
+              <span class="label">Category:</span>
+              <span>${p.category?.name || ''}</span>
+            </div>
+            <div class="price-info">
+              <div><strong>MRP:</strong> ₹${p.pricing?.mrp || '_________'}</div>
+              <div><strong>Discounted Price (15% Off):</strong> ₹${p.pricing?.discountedPrice || '_________'}</div>
+            </div>
+          </div>
+          <div class="barcode">
+            <svg id="barcode-single"></svg>
+            <div class="barcode-code">Code: ${p.code}</div>
           </div>
         </div>
       `;
@@ -484,9 +628,10 @@ const ViewProductsPage = () => {
         <script>
           JsBarcode("#barcode-single", "${p.code}", {
             format: "CODE128",
-            width: 1.5,
-            height: 40,
-            displayValue: false
+            width: ${stickerSize === 'thermal' || stickerSize === 'large' ? '1' : '1.5'},
+            height: ${dimensions.barcodeHeight},
+            displayValue: false,
+            margin: 1
           });
           setTimeout(() => window.print(), 1000);
         </script>
@@ -510,6 +655,11 @@ const ViewProductsPage = () => {
         toast.error('Failed to delete product');
       }
     }
+  };
+
+  const editProduct = (productId) => {
+    // Navigate to edit product page with the product ID
+    navigate(`/products/edit/${productId}`);
   };
 
   const ProductRow = ({ product, index, isChild = false }) => {
@@ -575,6 +725,15 @@ const ViewProductsPage = () => {
             }}
             className="barcode-label"
           />
+        </td>
+        <td>
+          <button 
+            onClick={e => { e.stopPropagation(); editProduct(product._id); }}
+            className="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
+            title="Edit Product"
+          >
+            <Edit className="h-4 w-4" />
+          </button>
         </td>
         <td>
           <button onClick={e => { e.stopPropagation(); printSingleProduct(product); }}>
@@ -689,10 +848,26 @@ const ViewProductsPage = () => {
             marginBottom: '20px',
             gap: '10px'
           }}>
+            <select
+              value={stickerSize}
+              onChange={(e) => setStickerSize(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                border: '1px solid #ccc',
+                borderRadius: '6px',
+                fontSize: '14px'
+              }}
+            >
+              <option value="small">Small (2×3 inch)</option>
+              <option value="medium">Medium (4×6 inch)</option>
+              <option value="large">Large (50×40 mm)</option>
+              <option value="thermal">Thermal (1×2 inch)</option>
+            </select>
             <button
               onClick={printSelected}
+              disabled={selectedProducts.size === 0}
               style={{
-                backgroundColor: '#0077cc',
+                backgroundColor: selectedProducts.size === 0 ? '#ccc' : '#0077cc',
                 color: 'white',
                 padding: '10px 18px',
                 border: 'none',
@@ -773,6 +948,7 @@ const ViewProductsPage = () => {
                   <th>MRP</th>
                   <th>Status</th>
                   <th>Barcode</th>
+                  <th>Edit</th>
                   <th>Print</th>
                   <th>Delete</th>
                 </tr>

@@ -63,6 +63,11 @@ const createCombo = async (req, res) => {
       createdAt: new Date()
     };
 
+    // Remove empty SKU to let model generate it
+    if (!comboData.sku || comboData.sku.trim() === '') {
+      delete comboData.sku;
+    }
+
     const combo = new Combo(comboData);
     await combo.save();
 

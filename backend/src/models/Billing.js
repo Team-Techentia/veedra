@@ -238,9 +238,23 @@ const billingSchema = new mongoose.Schema({
   payment: {
     method: {
       type: String,
-      enum: ['cash', 'card', 'upi', 'netbanking', 'wallet', 'credit'],
+      enum: ['cash', 'card', 'upi', 'netbanking', 'wallet', 'credit', 'mix', 'Mix'],
       required: true,
       default: 'cash'
+    },
+    mixPaymentDetails: {
+      cash: {
+        type: Number,
+        default: 0
+      },
+      card: {
+        type: Number,
+        default: 0
+      },
+      upi: {
+        type: Number,
+        default: 0
+      }
     },
     status: {
       type: String,
@@ -283,7 +297,7 @@ const billingSchema = new mongoose.Schema({
       staffId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: false  // Made optional for now - commission system coming soon
       },
       staffName: String,
       commissionRate: Number,
@@ -432,6 +446,23 @@ billingSchema.pre('save', async function(next) {
 
 // Calculate totals before saving
 billingSchema.pre('save', function(next) {
+  // Skip calculation if totals are already set (to prevent overriding payment controller calculations)
+  if (this.isNew && this.totals.finalAmount > 0) {
+    // Ensure final amount is never negative
+    this.totals.finalAmount = Math.max(0, this.totals.finalAmount);
+    this.totals.grandTotal = Math.max(0, this.totals.grandTotal);
+    
+    // Update analytics
+    this.analytics.totalItems = this.items.reduce((sum, item) => sum + item.quantity, 0);
+    this.analytics.averageItemValue = this.analytics.totalItems > 0 ? 
+      this.totals.subtotal / this.analytics.totalItems : 0;
+    this.analytics.isComboSale = this.appliedCombos.length > 0;
+    this.analytics.hasMixedItems = this.items.some(item => item.comboAssignment?.isComboItem) && 
+      this.items.some(item => !item.comboAssignment?.isComboItem);
+    
+    return next();
+  }
+  
   // Calculate subtotal
   this.totals.subtotal = this.items.reduce((sum, item) => {
     return sum + (item.unitPrice * item.quantity);
@@ -447,28 +478,26 @@ billingSchema.pre('save', function(next) {
     return sum + combo.savingsAmount;
   }, 0);
   
-  // Calculate taxable amount
-  this.totals.taxableAmount = this.totals.subtotal - this.totals.totalDiscount - this.totals.comboSavings;
+  // Calculate taxable amount (ensure it's not negative)
+  this.totals.taxableAmount = Math.max(0, this.totals.subtotal - this.totals.totalDiscount - this.totals.comboSavings);
   
-  // Calculate total tax
-  this.totals.totalTax = this.items.reduce((sum, item) => {
-    return sum + item.taxAmount;
-  }, 0);
+  // Calculate total tax (set to 0 since GST is included in prices)
+  this.totals.totalTax = 0;
   
-  // Calculate grand total
-  this.totals.grandTotal = this.totals.taxableAmount + this.totals.totalTax;
+  // Calculate grand total (ensure it's not negative)
+  this.totals.grandTotal = Math.max(0, this.totals.taxableAmount + this.totals.totalTax);
   
   // Apply round off
   this.totals.roundOff = Math.round(this.totals.grandTotal) - this.totals.grandTotal;
-  this.totals.finalAmount = Math.round(this.totals.grandTotal);
+  this.totals.finalAmount = Math.max(0, Math.round(this.totals.grandTotal));
   
   // Update analytics
   this.analytics.totalItems = this.items.reduce((sum, item) => sum + item.quantity, 0);
   this.analytics.averageItemValue = this.analytics.totalItems > 0 ? 
     this.totals.subtotal / this.analytics.totalItems : 0;
   this.analytics.isComboSale = this.appliedCombos.length > 0;
-  this.analytics.hasMixedItems = this.items.some(item => item.comboAssignment.isComboItem) && 
-    this.items.some(item => !item.comboAssignment.isComboItem);
+  this.analytics.hasMixedItems = this.items.some(item => item.comboAssignment?.isComboItem) && 
+    this.items.some(item => !item.comboAssignment?.isComboItem);
   
   next();
 });

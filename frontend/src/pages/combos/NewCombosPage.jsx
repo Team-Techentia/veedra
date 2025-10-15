@@ -66,8 +66,19 @@ const CombosPage = () => {
   };
 
   const generateComboSku = () => {
-    const seq = (combos.length + 1).toString().padStart(4, '0');
-    return `CMB-${seq}`;
+    // Find the highest existing SKU number to avoid duplicates
+    let maxNumber = 0;
+    combos.forEach(combo => {
+      if (combo.sku && combo.sku.startsWith('CMB-')) {
+        const numberPart = parseInt(combo.sku.substring(4));
+        if (!isNaN(numberPart) && numberPart > maxNumber) {
+          maxNumber = numberPart;
+        }
+      }
+    });
+    
+    const nextNumber = maxNumber + 1;
+    return `CMB-${nextNumber.toString().padStart(4, '0')}`;
   };
 
   const computeStatus = (combo) => {
@@ -221,9 +232,10 @@ const CombosPage = () => {
     if (!validateForm()) return;
     
     try {
+
+      
       const payload = {
         ...formData,
-        sku: formData.sku || generateComboSku(),
         offerPrice: Number(formData.offerPrice),
         qtyProducts: Number(formData.qtyProducts) || formData.rules.slots.length,
         rules: {
@@ -236,6 +248,11 @@ const CombosPage = () => {
           }))
         }
       };
+
+      // Only include SKU if user manually entered one, otherwise let backend generate it
+      if (formData.sku && formData.sku.trim()) {
+        payload.sku = formData.sku.trim();
+      }
 
       if (editingComboSku) {
         const combo = combos.find(c => c.sku === editingComboSku);
@@ -357,30 +374,108 @@ const CombosPage = () => {
       return <div className="text-gray-500 text-center">Configure your combo to preview the sticker…</div>;
     }
 
+    const slotList = formData.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ');
+    // Use pixels for preview (3in = ~288px, 2in = ~192px at 96dpi)
+    const stickerWidth = '320px'; // Better for preview display
+    const stickerHeight = '220px'; // Better for preview display
+
+    // Color mapping for background
     const colorMap = { 
-      Blue: "#dbeafe", Green: "#dcfce7", Orange: "#ffedd5", 
-      Pink: "#fde2e8", Yellow: "#fef9c3", Purple: "#ede9fe", Red: "#fee2e2" 
+      Blue: "#dbeafe", 
+      Green: "#dcfce7", 
+      Orange: "#ffedd5", 
+      Pink: "#fde2e8", 
+      Yellow: "#fef9c3", 
+      Purple: "#ede9fe", 
+      Red: "#fee2e2" 
     };
-    const bg = colorMap[formData.colorTag] || "#f1f5f9";
-
-    const qrBox = stickerConfig.showQR === 'qr'
-      ? <div style={{border:'2px solid #111',width:'64px',height:'64px',display:'inline-block',fontSize:'10px',textAlign:'center',lineHeight:'60px'}}>QR</div>
-      : stickerConfig.showQR === 'barcode'
-        ? <div style={{border:'2px solid #111',width:'120px',height:'40px',display:'inline-block',fontSize:'10px',textAlign:'center',lineHeight:'36px'}}>||||||||||</div>
-        : null;
-
-    const slotList = formData.rules.slots.map(s => `${formatCurrency(s.minPrice)}–${formatCurrency(s.maxPrice)}`).join(', ');
+    const backgroundColor = colorMap[formData.colorTag] || "#ffffff";
 
     return (
-      <div style={{background:bg, border:'1px dashed #777', borderRadius:'8px', padding:'14px'}} className={stickerConfig.size === 'S' ? 'text-xs' : stickerConfig.size === 'L' ? 'text-base' : 'text-sm'}>
-        <div className="flex justify-between items-center gap-2 mb-2">
-          <strong>{formData.name}</strong>
-          {qrBox}
+      <div 
+        style={{
+          width: stickerWidth,
+          height: stickerHeight,
+          border: '2px solid #000',
+          background: backgroundColor,
+          padding: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          fontFamily: 'Arial, sans-serif',
+          fontSize: '14px',
+          lineHeight: '1.3',
+          boxSizing: 'border-box'
+        }}
+      >
+        {/* Header */}
+        <div 
+          style={{
+            textAlign: 'center',
+            fontWeight: 'bold',
+            paddingBottom: '6px',
+            marginBottom: '8px',
+            fontSize: '18px'
+          }}
+        >
+          VEEDRA THE BRAND
         </div>
-        <div className="mb-1">SKU: <strong>{formData.sku || 'CMB-XXXX'}</strong></div>
-        <div className="mb-1">Price Slots: {slotList}</div>
-        <div className="mb-1 text-lg">Offer: <strong>{formatCurrency(formData.offerPrice)}</strong></div>
-        <div className="text-gray-600">{formData.notes}</div>
+        
+        {/* Content Area */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {/* Name */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontWeight: 'bold', minWidth: '50px', fontSize: '14px' }}>Name:</span>
+            <div style={{ 
+              flex: 1, 
+              minHeight: '18px',
+              paddingLeft: '4px',
+              fontSize: '14px'
+            }}>
+              {formData.name || ''}
+            </div>
+          </div>
+          
+          {/* SKU */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontWeight: 'bold', minWidth: '50px', fontSize: '14px' }}>SKU:</span>
+            <span style={{ fontSize: '14px' }}>{formData.sku.trim() || generateComboSku()}</span>
+          </div>
+          
+          {/* Type */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontWeight: 'bold', minWidth: '50px', fontSize: '14px' }}>Type:</span>
+            <div style={{ 
+              flex: 1, 
+              minHeight: '18px',
+              paddingLeft: '4px',
+              fontSize: '14px'
+            }}>
+              {formData.type || ''}
+            </div>
+          </div>
+          
+          {/* Spacer */}
+          <div style={{ margin: '8px 0' }}></div>
+          
+          {/* Price Information */}
+          <div style={{ fontSize: '12px' }}>
+            <div style={{ marginBottom: '6px' }}>
+              <strong>Price Slots:</strong> {slotList || '₹350–400 | ₹430–500'}
+            </div>
+            <div style={{ 
+              fontSize: '18px',
+              fontWeight: 'bold',
+              textAlign: 'center',
+              background: '#f59e0b',
+              color: 'white',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              marginTop: '4px'
+            }}>
+              ₹{formData.offerPrice}
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -391,33 +486,62 @@ const CombosPage = () => {
       return '<div>Configure your combo first</div>';
     }
 
-    const colorMap = { 
-      Blue: "#dbeafe", Green: "#dcfce7", Orange: "#ffedd5", 
-      Pink: "#fde2e8", Yellow: "#fef9c3", Purple: "#ede9fe", Red: "#fee2e2" 
-    };
-    const bg = colorMap[formData.colorTag] || "#f1f5f9";
-
-    const fontSize = stickerConfig.size === 'S' ? '12px' : stickerConfig.size === 'L' ? '16px' : '14px';
+    const fontSize = stickerConfig.size === 'S' ? '10px' : stickerConfig.size === 'L' ? '14px' : '12px';
+    const slotList = formData.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ');
     
-    let qrBoxHTML = '';
-    if (stickerConfig.showQR === 'qr') {
-      qrBoxHTML = `<div style="border:2px solid #111; width:64px; height:64px; display:inline-block; font-size:10px; text-align:center; line-height:60px;">QR</div>`;
-    } else if (stickerConfig.showQR === 'barcode') {
-      qrBoxHTML = `<div style="border:2px solid #111; width:120px; height:40px; display:inline-block; font-size:10px; text-align:center; line-height:36px;">||||||||||</div>`;
-    }
-
-    const slotList = formData.rules.slots.map(s => `${formatCurrency(s.minPrice)}–${formatCurrency(s.maxPrice)}`).join(', ');
-
+    // Color mapping for background
+    const colorMap = { 
+      Blue: "#dbeafe", 
+      Green: "#dcfce7", 
+      Orange: "#ffedd5", 
+      Pink: "#fde2e8", 
+      Yellow: "#fef9c3", 
+      Purple: "#ede9fe", 
+      Red: "#fee2e2" 
+    };
+    const backgroundColor = colorMap[formData.colorTag] || "#ffffff";
+    
     return `
-      <div style="background:${bg}; border:1px dashed #777; border-radius:8px; padding:14px; font-size:${fontSize}; font-family:Segoe UI, Roboto, sans-serif;">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
-          <strong>${formData.name}</strong>
-          ${qrBoxHTML}
+      <div style="
+        width: 6cm; 
+        height: 4cm; 
+        padding: 2mm; 
+        border: 1px solid #000; 
+        background: ${backgroundColor}; 
+        box-sizing: border-box; 
+        display: flex; 
+        flex-direction: column; 
+        justify-content: space-between;
+        font-family: Arial, sans-serif;
+        font-size: 10px;
+        line-height: 1.2;
+      ">
+        <div style="
+          font-size: 16px; 
+          font-weight: bold; 
+          text-align: center; 
+          margin-bottom: 2mm; 
+          padding-bottom: 2mm;
+        ">VEEDRA THE BRAND</div>
+        
+        <div style="font-size: 12px; line-height: 1.4; flex: 1;">
+          <div style="margin-bottom: 2mm; display: flex; align-items: center;">
+            <span style="font-weight: bold; margin-right: 2mm; font-size: 12px;">Name:</span>
+            <span style="flex: 1; height: 1.2em; display: inline-block; padding-left: 1mm; font-size: 12px;">${formData.name || ''}</span>
+          </div>
+          <div style="margin-bottom: 2mm; display: flex; align-items: center;">
+            <span style="font-weight: bold; margin-right: 2mm; font-size: 12px;">SKU:</span>
+            <span style="font-size: 12px;">${formData.sku.trim() || generateComboSku()}</span>
+          </div>
+          <div style="margin-bottom: 2mm; display: flex; align-items: center;">
+            <span style="font-weight: bold; margin-right: 2mm; font-size: 12px;">Type:</span>
+            <span style="flex: 1; height: 1.2em; display: inline-block; padding-left: 1mm; font-size: 12px;">${formData.type || ''}</span>
+          </div>
+          <div style="margin: 2mm 0; font-size: 11px;">
+            <div style="margin-bottom: 1mm;"><strong>Price Slots:</strong> ${slotList || '₹350–400 | ₹430–500'}</div>
+            <div style="font-size: 16px; font-weight: bold; white-space: nowrap;"><strong>Combo Offer Price: ₹${formData.offerPrice}</strong></div>
+          </div>
         </div>
-        <div style="margin-bottom:4px;">SKU: <strong>${formData.sku || 'CMB-XXXX'}</strong></div>
-        <div style="margin-bottom:4px;">Price Slots: ${slotList}</div>
-        <div style="margin-bottom:4px; font-size:18px;">Offer: <strong>${formatCurrency(formData.offerPrice)}</strong></div>
-        <div style="color:#666;">${formData.notes}</div>
       </div>
     `;
   };
@@ -431,14 +555,58 @@ const CombosPage = () => {
     }
     
     const stickerHTML = renderStickerHTML();
-    const repeated = Array.from({ length: copies }).map(() => `<div style="margin:10px;display:inline-block;">${stickerHTML}</div>`).join("");
+    const repeated = Array.from({ length: copies }).map(() => `<div class="sticker-container">${stickerHTML}</div>`).join("");
     
     w.document.write(`
       <html>
         <head>
-          <title>Print Stickers</title>
+          <title>Print Combo Stickers</title>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <style>@page{margin:10mm;}body{font-family:Segoe UI, Roboto, sans-serif;}</style>
+          <style>
+            @page { 
+              size: A4; 
+              margin: 10mm; 
+            }
+            * {
+              box-sizing: border-box;
+            }
+            body { 
+              font-family: Arial, sans-serif; 
+              margin: 0;
+              padding: 5mm;
+              display: flex; 
+              flex-wrap: wrap; 
+              justify-content: flex-start;
+              align-items: flex-start;
+            }
+            .sticker-container { 
+              margin: 3mm; 
+              display: inline-block;
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            .sticker-container > div {
+              width: 3in !important;
+              height: 2in !important;
+              max-width: 3in !important;
+              max-height: 2in !important;
+              overflow: hidden;
+              font-size: 10px !important;
+              line-height: 1.2 !important;
+              padding: 2mm !important;
+            }
+            @media print {
+              body { 
+                margin: 0; 
+                padding: 5mm; 
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .sticker-container { 
+                margin: 2mm; 
+              }
+            }
+          </style>
         </head>
         <body>${repeated}</body>
       </html>

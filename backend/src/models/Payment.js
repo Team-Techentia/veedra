@@ -19,7 +19,21 @@ const paymentSchema = new mongoose.Schema({
   paymentMethod: {
     type: String,
     required: true,
-    enum: ['cash', 'card', 'upi', 'netbanking', 'wallet']
+    enum: ['cash', 'card', 'upi', 'netbanking', 'wallet', 'mix', 'Mix']
+  },
+  mixPaymentDetails: {
+    cash: {
+      type: Number,
+      default: 0
+    },
+    card: {
+      type: Number,
+      default: 0
+    },
+    upi: {
+      type: Number,
+      default: 0
+    }
   },
   status: {
     type: String,

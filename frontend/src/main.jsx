@@ -19,6 +19,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             style: {
               background: '#363636',
               color: '#fff',
+              marginTop: '80px', // push down from top to avoid search
+              marginRight: '24px', // spacing from right edge
+              zIndex: 9999,
+              minWidth: '260px',
+              maxWidth: '350px',
             },
             success: {
               duration: 3000,

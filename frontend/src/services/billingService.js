@@ -10,7 +10,7 @@ const billingService = {
   // Get bills
   getBills: async (params = {}) => {
     const response = await api.get('/billing', { params })
-    return response.data
+    return response // API interceptor already returns response.data
   },
 
   // Get bill by ID
@@ -49,6 +49,12 @@ const billingService = {
   getStaffSales: async (staffId, params = {}) => {
     const response = await api.get(`/billing/reports/staff/${staffId}`, { params })
     return response.data
+  },
+
+  // Get sales report for download
+  getSalesReport: async (params = {}) => {
+    const response = await api.get('/billing/reports/download', { params })
+    return response
   }
 }
 

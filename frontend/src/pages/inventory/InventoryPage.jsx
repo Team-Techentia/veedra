@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Package, AlertTriangle, Plus, Minus, Eye, Search, Filter } from 'lucide-react';
+import { Package, AlertTriangle, Plus, Minus, Eye, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import inventoryService from '../../services/inventoryService';
+import toast from 'react-hot-toast';
 
 const InventoryPage = () => {
   const [inventory, setInventory] = useState([]);
@@ -13,30 +14,46 @@ const InventoryPage = () => {
   const [adjustmentType, setAdjustmentType] = useState('add');
   const [adjustmentQuantity, setAdjustmentQuantity] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
+  
+  // Detail view state
+  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
     loadInventory();
   }, []);
 
+  // Reset to first page when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType]);
+
   const loadInventory = async () => {
     setLoading(true);
     try {
       console.log('Loading inventory data...');
-      const inventoryData = await inventoryService.getInventory();
+      const response = await inventoryService.getInventory();
+      console.log('Inventory response:', response);
+      
+      // Handle the backend response structure
+      const inventoryData = response.data || response;
       console.log('Inventory data loaded:', inventoryData);
       setInventory(inventoryData);
     } catch (error) {
       console.error('Error loading inventory:', error);
       console.error('Error details:', error.response?.data || error.message);
-      console.log('Failed to load inventory');
+      toast.error('Failed to load inventory');
     } finally {
       setLoading(false);
     }
   };
 
   const handleStockAdjustment = async () => {
-    if (!adjustmentQuantity || !adjustmentReason) {
-      console.log('Please fill all fields');
+    if (!adjustmentQuantity) {
+      toast.error('Please enter adjustment quantity');
       return;
     }
 
@@ -44,24 +61,34 @@ const InventoryPage = () => {
     const adjustmentValue = adjustmentType === 'add' ? quantity : -quantity;
 
     try {
-      await inventoryService.adjustStock({
+      const response = await inventoryService.adjustStock({
         productId: selectedItem._id,
         adjustment: adjustmentValue,
-        reason: adjustmentReason,
+        reason: adjustmentReason || `${adjustmentType === 'add' ? 'Stock addition' : 'Stock removal'} - ${new Date().toLocaleDateString()}`,
         type: 'adjustment'
       });
 
       // Reload inventory to get updated data
       await loadInventory();
       
-      console.log(`Stock ${adjustmentType === 'add' ? 'added' : 'removed'} successfully`);
+      toast.success(`Stock ${adjustmentType === 'add' ? 'added' : 'removed'} successfully`);
       setShowAdjustment(false);
       setAdjustmentQuantity('');
       setAdjustmentReason('');
     } catch (error) {
       console.error('Error adjusting stock:', error);
-      console.log('Failed to adjust stock');
+      toast.error(error.response?.data?.message || 'Failed to adjust stock');
     }
+  };
+
+  // Helper function to determine stock status
+  const getStockStatus = (item) => {
+    const currentStock = item.inventory?.currentStock || 0;
+    const minStock = item.inventory?.minStockLevel || 0;
+    
+    if (currentStock === 0) return 'out_of_stock';
+    if (currentStock <= minStock) return 'low_stock';
+    return 'in_stock';
   };
 
   const filteredInventory = inventory.filter(item => {
@@ -69,8 +96,30 @@ const InventoryPage = () => {
                          item.code.toLowerCase().includes(searchTerm.toLowerCase());
     
     if (filterType === 'all') return matchesSearch;
-    return matchesSearch && (item.stockStatus || 'in_stock') === filterType;
+    return matchesSearch && getStockStatus(item) === filterType;
   });
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredInventory.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentItems = filteredInventory.slice(startIndex, endIndex);
+
+  const goToPage = (page) => {
+    setCurrentPage(page);
+  };
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  const goToPrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -82,9 +131,9 @@ const InventoryPage = () => {
   };
 
   const totalItems = inventory.length;
-  const inStock = inventory.filter(item => (item.stockStatus || 'in_stock') === 'in_stock').length;
-  const lowStock = inventory.filter(item => (item.stockStatus || 'in_stock') === 'low_stock').length;
-  const outOfStock = inventory.filter(item => (item.stockStatus || 'in_stock') === 'out_of_stock').length;
+  const inStock = inventory.filter(item => getStockStatus(item) === 'in_stock').length;
+  const lowStock = inventory.filter(item => getStockStatus(item) === 'low_stock').length;
+  const outOfStock = inventory.filter(item => getStockStatus(item) === 'out_of_stock').length;
 
   if (loading) {
     return (
@@ -202,7 +251,7 @@ const InventoryPage = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredInventory.map((item) => (
+                {currentItems.map((item) => (
                   <tr key={item._id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <div>
@@ -213,7 +262,9 @@ const InventoryPage = () => {
                     <td className="px-6 py-4 text-sm text-gray-900">{item.category?.name || 'N/A'}</td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-medium text-gray-900">{item.inventory?.currentStock || 0}</div>
-                      <div className="text-xs text-gray-500">Last updated: {new Date(item.updatedAt).toLocaleDateString()}</div>
+                      <div className="text-xs text-gray-500">
+                        Last updated: {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : 'Invalid Date'}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
                       {item.inventory?.minStockLevel || 0} / {item.inventory?.maxStockLevel || 0}
@@ -221,9 +272,9 @@ const InventoryPage = () => {
                     <td className="px-6 py-4 text-sm text-gray-900">Main Store</td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        getStatusColor(item.stockStatus || 'in_stock')
+                        getStatusColor(getStockStatus(item))
                       }`}>
-                        {(item.stockStatus || 'in_stock').replace('_', ' ').toUpperCase()}
+                        {getStockStatus(item).replace('_', ' ').toUpperCase()}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm font-medium space-x-2">
@@ -250,7 +301,10 @@ const InventoryPage = () => {
                         <Minus className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => setSelectedItem(item)}
+                        onClick={() => {
+                          setSelectedItem(item);
+                          setShowDetails(true);
+                        }}
                         className="text-blue-600 hover:text-blue-900 p-1"
                         title="View Details"
                       >
@@ -262,6 +316,70 @@ const InventoryPage = () => {
               </tbody>
             </table>
           </div>
+          
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+              <div className="flex-1 flex justify-between sm:hidden">
+                <button
+                  onClick={goToPrevPage}
+                  disabled={currentPage === 1}
+                  className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={goToNextPage}
+                  disabled={currentPage === totalPages}
+                  className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+              <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm text-gray-700">
+                    Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
+                    <span className="font-medium">{Math.min(endIndex, filteredInventory.length)}</span> of{' '}
+                    <span className="font-medium">{filteredInventory.length}</span> results
+                  </p>
+                </div>
+                <div>
+                  <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                    <button
+                      onClick={goToPrevPage}
+                      disabled={currentPage === 1}
+                      className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => goToPage(page)}
+                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                          currentPage === page
+                            ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
+                            : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    
+                    <button
+                      onClick={goToNextPage}
+                      disabled={currentPage === totalPages}
+                      className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+                  </nav>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -285,7 +403,7 @@ const InventoryPage = () => {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Current Stock: {selectedItem.currentStock}
+                    Current Stock: {selectedItem.inventory?.currentStock || 0}
                   </label>
                 </div>
                 
@@ -305,14 +423,14 @@ const InventoryPage = () => {
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Reason
+                    Reason <span className="text-gray-400 font-normal">(Optional)</span>
                   </label>
                   <input
                     type="text"
                     value={adjustmentReason}
                     onChange={(e) => setAdjustmentReason(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Enter reason for adjustment"
+                    placeholder="Enter reason for adjustment (optional)"
                   />
                 </div>
                 
@@ -320,8 +438,8 @@ const InventoryPage = () => {
                   <div className="bg-gray-50 p-3 rounded-lg">
                     <p className="text-sm text-gray-600">
                       New Stock Level: {adjustmentType === 'add' 
-                        ? selectedItem.currentStock + parseInt(adjustmentQuantity || 0)
-                        : selectedItem.currentStock - parseInt(adjustmentQuantity || 0)
+                        ? (selectedItem.inventory?.currentStock || 0) + parseInt(adjustmentQuantity || 0)
+                        : (selectedItem.inventory?.currentStock || 0) - parseInt(adjustmentQuantity || 0)
                       }
                     </p>
                   </div>
@@ -344,6 +462,125 @@ const InventoryPage = () => {
                   }`}
                 >
                   {adjustmentType === 'add' ? 'Add Stock' : 'Remove Stock'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product Details Modal */}
+      {showDetails && selectedItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium">Product Details</h3>
+                <button
+                  onClick={() => setShowDetails(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ×
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Product Name</label>
+                    <p className="text-sm text-gray-900">{selectedItem.name}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Product Code</label>
+                    <p className="text-sm text-gray-900">{selectedItem.code}</p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                    <p className="text-sm text-gray-900">{selectedItem.category?.name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
+                    <p className="text-sm text-gray-900">{selectedItem.vendor?.name || 'N/A'}</p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Current Stock</label>
+                    <p className="text-sm font-semibold text-gray-900">{selectedItem.inventory?.currentStock || 0}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Min Stock Level</label>
+                    <p className="text-sm text-gray-900">{selectedItem.inventory?.minStockLevel || 0}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Max Stock Level</label>
+                    <p className="text-sm text-gray-900">{selectedItem.inventory?.maxStockLevel || 0}</p>
+                  </div>
+                </div>
+                
+                {selectedItem.pricing && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Pricing Information</label>
+                    <div className="grid grid-cols-2 gap-4 bg-gray-50 p-3 rounded-lg">
+                      {selectedItem.pricing.factoryPrice && (
+                        <div>
+                          <span className="text-xs text-gray-500">Factory Price</span>
+                          <p className="text-sm font-medium">₹{selectedItem.pricing.factoryPrice}</p>
+                        </div>
+                      )}
+                      {selectedItem.pricing.offerPrice && (
+                        <div>
+                          <span className="text-xs text-gray-500">Offer Price</span>
+                          <p className="text-sm font-medium">₹{selectedItem.pricing.offerPrice}</p>
+                        </div>
+                      )}
+                      {selectedItem.pricing.mrp && (
+                        <div>
+                          <span className="text-xs text-gray-500">MRP</span>
+                          <p className="text-sm font-medium">₹{selectedItem.pricing.mrp}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                    getStatusColor(getStockStatus(selectedItem))
+                  }`}>
+                    {getStockStatus(selectedItem).replace('_', ' ').toUpperCase()}
+                  </span>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Last Updated</label>
+                  <p className="text-sm text-gray-900">
+                    {selectedItem.updatedAt ? new Date(selectedItem.updatedAt).toLocaleString() : 'Invalid Date'}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t">
+                <button
+                  onClick={() => setShowDetails(false)}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    setShowDetails(false);
+                    setAdjustmentType('add');
+                    setShowAdjustment(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Adjust Stock
                 </button>
               </div>
             </div>

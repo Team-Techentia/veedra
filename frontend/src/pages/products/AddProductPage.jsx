@@ -59,6 +59,13 @@ const AddProductPage = () => {
   const [vendorSearch, setVendorSearch] = useState('');
   const [mixedBundleConfig, setMixedBundleConfig] = useState([]);
   
+  // Auto-calculation state for pricing fields
+  const [autoCalculation, setAutoCalculation] = useState({
+    offerPrice: true,
+    discountedPrice: true,
+    mrp: true
+  });
+  
   const BRANCH_CODE = "SHI";
 
   // Load categories and vendors from API
@@ -106,19 +113,8 @@ const AddProductPage = () => {
           color: baseColor,
           quantity: 0
         }));
-      } else if (formData.bundleType === 'mixedSizeMixedColor' && sizes.length > 0 && colors.length > 0) {
-        // Generate config for all size-color combinations
-        sizes.forEach(size => {
-          colors.forEach(color => {
-            newConfig.push({
-              key: `${size}-${color}`,
-              size: size,
-              color: color,
-              quantity: 0
-            });
-          });
-        });
       }
+      // Note: different_sizes_different_colors doesn't need custom quantity configuration
       
       // Only update if the config structure changed
       if (newConfig.length > 0 && JSON.stringify(newConfig.map(c => c.key)) !== JSON.stringify(mixedBundleConfig.map(c => c.key))) {
@@ -149,10 +145,16 @@ const AddProductPage = () => {
     }
   };
 
+  // Get GST rate based on price
+  const getGSTRate = (price) => {
+    return price > 2500 ? 0.12 : 0.05; // 12% for products above ₹2500, 5% for others
+  };
+
   // Calculate prices automatically based on factory price
   const calculatePrices = (factoryPrice) => {
     const profitPrice = factoryPrice * 2;
-    const gst = profitPrice * 0.05;
+    const gstRate = getGSTRate(profitPrice);
+    const gst = profitPrice * gstRate;
     const afterGst = profitPrice + gst;
     const commission = (afterGst / 500) * 30;
     const offer = Math.round(afterGst + commission);
@@ -179,18 +181,52 @@ const AddProductPage = () => {
       const { offer, price15, mrp } = calculatePrices(factoryPrice);
       setFormData(prev => ({
         ...prev,
-        offerPrice: offer.toString(),
-        discountedPrice: price15.toString(),
-        mrp: mrp.toString()
+        offerPrice: autoCalculation.offerPrice ? offer.toString() : prev.offerPrice,
+        discountedPrice: autoCalculation.discountedPrice ? price15.toString() : prev.discountedPrice,
+        mrp: autoCalculation.mrp ? mrp.toString() : prev.mrp
       }));
     } else {
+      // Only clear auto-calculated fields
       setFormData(prev => ({
         ...prev,
-        offerPrice: '',
-        discountedPrice: '',
-        mrp: ''
+        offerPrice: autoCalculation.offerPrice ? '' : prev.offerPrice,
+        discountedPrice: autoCalculation.discountedPrice ? '' : prev.discountedPrice,
+        mrp: autoCalculation.mrp ? '' : prev.mrp
       }));
     }
+  };
+
+  // Handle manual price changes
+  const handlePriceChange = (field) => (e) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: e.target.value
+    }));
+  };
+
+  // Toggle auto-calculation for a price field
+  const toggleAutoCalculation = (field) => {
+    setAutoCalculation(prev => {
+      const newState = { ...prev, [field]: !prev[field] };
+      
+      // If turning auto-calculation back on, recalculate the price
+      if (newState[field] && formData.factoryPrice) {
+        const factoryPrice = parseFloat(formData.factoryPrice);
+        if (!isNaN(factoryPrice) && factoryPrice > 0) {
+          const { offer, price15, mrp } = calculatePrices(factoryPrice);
+          const newValue = field === 'offerPrice' ? offer.toString() : 
+                          field === 'discountedPrice' ? price15.toString() : 
+                          mrp.toString();
+          
+          setFormData(prevData => ({
+            ...prevData,
+            [field]: newValue
+          }));
+        }
+      }
+      
+      return newState;
+    });
   };
 
   // Generate next product code based on category
@@ -335,31 +371,16 @@ const AddProductPage = () => {
           } else {
             preview += `  ⚠️ No custom quantities configured for sizes\n`;
           }
-        } else if (formData.bundleType === 'mixedSizeMixedColor') {
+        } else if (formData.bundleType === 'different_sizes_different_colors') {
           preview += `👕 Bundle Type: Mixed Size & Color\n`;
-          preview += `📏 Sizes: ${sizes.length > 0 ? sizes.join(', ') : 'Not specified'}\n`;
-          preview += `🎨 Colors: ${colors.length > 0 ? colors.join(', ') : 'Not specified'}\n`;
-          preview += `📦 Total Quantity: ${quantity} (kept in parent)\n\n`;
-          preview += `📋 Parent-Child Hierarchy:\n`;
-          preview += `  Parent: ${formData.name} - ${quantity} items (${productCode})\n`;
-          preview += `  Children (Reference Variants):\n`;
-          
-          if (sizes.length > 0 && colors.length > 0) {
-            let configIndex = 1;
-            
-            sizes.forEach(size => {
-              colors.forEach(color => {
-                const childCode = `${productCode}/${configIndex.toString().padStart(2, '0')}`;
-                preview += `    ${configIndex}. ${size}-${color} (${childCode})\n`;
-                configIndex++;
-              });
-            });
-            
-            preview += `\n💡 All ${quantity} items are kept in the parent product.\n`;
-            preview += `   Children are reference variants for size-color combinations.\n`;
-          } else {
-            preview += `  ⚠️ Please specify both sizes and colors\n`;
-          }
+          preview += `� Total Quantity: ${quantity} items\n`;
+          preview += `📋 Product Structure: Parent Only (No size/color variants)\n\n`;
+          preview += `🎯 Product Details:\n`;
+          preview += `  Product: ${formData.name} (${productCode})\n`;
+          preview += `  Type: Parent product without children\n`;
+          preview += `  Stock: ${quantity} mixed size/color items\n`;
+          preview += `\n💡 This creates a single parent product with total quantity.\n`;
+          preview += `💡 No individual size/color variants are created.\n`;
         } else {
           preview += `❓ Unknown Bundle Type: ${formData.bundleType}\n`;
         }
@@ -490,16 +511,13 @@ const AddProductPage = () => {
       }
     }
 
-    if (formData.bundleType === 'mixedSizeMixedColor') {
-      if (sizes.length === 0) {
-        toast.error('Enter sizes for the mixed bundle');
+  if (formData.bundleType === 'different_sizes_different_colors') {
+      // For Mixed Size Mixed Color bundles, we only need quantity - no specific sizes/colors
+      if (quantity <= 0) {
+        toast.error('Enter a valid quantity for the mixed bundle');
         return false;
       }
-      if (colors.length === 0) {
-        toast.error('Enter colors for the mixed bundle');
-        return false;
-      }
-      // No custom quantity validation needed for mixedSizeMixedColor
+  // No custom quantity validation needed for different_sizes_different_colors
     }
 
     return true;
@@ -538,12 +556,8 @@ const AddProductPage = () => {
       }
     }
 
-    if (formData.bundleType === 'mixedSizeMixedColor' && mixedBundleConfig.length > 0) {
-      const configuredTotal = mixedBundleConfig.reduce((sum, item) => sum + item.quantity, 0);
-      const combinations = mixedBundleConfig.filter(item => item.quantity > 0).map(item => 
-        `${item.size}-${item.color}: ${item.quantity}`
-      ).join(', ');
-      return `Total quantity: ${configuredTotal} items`;
+  if (formData.bundleType === 'different_sizes_different_colors') {
+      return `Mixed Size & Color Bundle - ${quantity} total items (Parent product only, no individual variants)`;
     }
 
     return null;
@@ -596,7 +610,7 @@ const AddProductPage = () => {
         code: generatedCode,
         barcode: generatedBarcode,
         category: formData.category,
-        subcategory: formData.subcategory,
+        ...(formData.subcategory && formData.subcategory.trim() && { subcategory: formData.subcategory }),
         vendor: selectedVendor._id,
         pricing: {
           factoryPrice: parseFloat(formData.factoryPrice),
@@ -632,18 +646,20 @@ const AddProductPage = () => {
         } else if (formData.bundleType === 'differentSizesSameColor') {
           bundleType = 'different_sizes_same_color';
           bundleSize = sizes.length;
-        } else if (formData.bundleType === 'mixedSizeMixedColor') {
+  } else if (formData.bundleType === 'different_sizes_different_colors') {
           bundleType = 'different_sizes_different_colors';
-          bundleSize = sizes.length * colors.length; // Total combinations
+          bundleSize = 1; // Single parent product, no size/color combinations
         }
         
         const bundleConfig = {
           baseSize: formData.bundleType === 'sameSizeDifferentColors' ? sizes[0] : 
+                   formData.bundleType === 'different_sizes_different_colors' ? null : // No specific size for mixed bundles
                    sizes.length > 0 ? sizes[0] : null,
           baseColor: formData.bundleType === 'differentSizesSameColor' ? colors[0] : 
+                    formData.bundleType === 'different_sizes_different_colors' ? null : // No specific color for mixed bundles
                     colors.length > 0 ? colors[0] : null,
-          sizes: sizes,
-          colors: colors,
+          sizes: formData.bundleType === 'different_sizes_different_colors' ? [] : sizes, // Empty arrays for mixed bundles
+          colors: formData.bundleType === 'different_sizes_different_colors' ? [] : colors,
           quantity: parseInt(formData.quantity),
           priceVariation: 0
         };
@@ -656,13 +672,13 @@ const AddProductPage = () => {
           // For different sizes same color, create mixed config from size quantities
           bundleConfig.mixedConfig = mixedBundleConfig.filter(item => item.quantity > 0 && item.size);
         }
-        // Note: mixedSizeMixedColor does NOT use custom quantities - just total quantity
+  // Note: different_sizes_different_colors does NOT use custom quantities - just total quantity
         
         baseProduct.bundle = {
           isBundle: true,
           bundleType: bundleType,
           bundleSize: bundleSize,
-          autoGenerateChildren: true,
+          autoGenerateChildren: formData.bundleType !== 'different_sizes_different_colors', // Don't generate children for mixed bundles
           bundlePrefix: formData.name.substring(0, 5).toUpperCase(),
           bundleConfig: bundleConfig
         };
@@ -674,6 +690,9 @@ const AddProductPage = () => {
         } else if (formData.bundleType === 'differentSizesSameColor' && sizes.length > 0 && colors.length > 0) {
           baseProduct.specifications.size = sizes[0]; // First size as parent
           baseProduct.specifications.color = colors[0];
+  } else if (formData.bundleType === 'different_sizes_different_colors') {
+          // For mixed bundles, don't set specific size/color - leave as general parent
+          // The product will represent the entire mixed bundle without specific variants
         }
       }
 
@@ -836,7 +855,7 @@ const AddProductPage = () => {
                       <option value="">Select Bundle Type</option>
                       <option value="sameSizeDifferentColors">Same Size, Different Colors</option>
                       <option value="differentSizesSameColor">Different Sizes, Same Color</option>
-                      <option value="mixedSizeMixedColor">Mixed Size, Mixed Color</option>
+                      <option value="different_sizes_different_colors">Mixed Size, Mixed Color</option>
                     </select>
                   </div>
 
@@ -860,41 +879,51 @@ const AddProductPage = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Sizes {formData.bundleType && <span className="text-red-500">*</span>}
+                      Sizes {formData.bundleType && formData.bundleType !== 'different_sizes_different_colors' && <span className="text-red-500">*</span>}
                     </label>
                     <input
                       type="text"
                       name="sizes"
                       value={formData.sizes}
                       onChange={handleInputChange}
-                      placeholder="e.g., S, M, L, XL"
+                      placeholder={formData.bundleType === 'different_sizes_different_colors' ? 'Not required for Mix Size Mix Color' : 'e.g., S, M, L, XL'}
+                      disabled={formData.bundleType === 'different_sizes_different_colors'}
                       className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                        formData.bundleType === 'different_sizes_different_colors' ? 'bg-gray-100 text-gray-400' :
                         formData.bundleType && !formData.sizes ? 'border-red-300 bg-red-50' : 'border-gray-300'
                       }`}
-                      required={!!formData.bundleType}
+                      required={!!formData.bundleType && formData.bundleType !== 'different_sizes_different_colors'}
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      Comma separated values {formData.bundleType ? '(Required for bundles)' : ''}
+                      {formData.bundleType === 'different_sizes_different_colors' 
+                        ? 'Sizes not needed for Mixed Size Mixed Color bundles'
+                        : `Comma separated values ${formData.bundleType ? '(Required for bundles)' : ''}`
+                      }
                     </p>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Colors {formData.bundleType && <span className="text-red-500">*</span>}
+                      Colors {formData.bundleType && formData.bundleType !== 'different_sizes_different_colors' && <span className="text-red-500">*</span>}
                     </label>
                     <input
                       type="text"
                       name="colors"
                       value={formData.colors}
                       onChange={handleInputChange}
-                      placeholder="e.g., Red, Blue, Green"
+                      placeholder={formData.bundleType === 'different_sizes_different_colors' ? 'Not required for Mix Size Mix Color' : 'e.g., Red, Blue, Green'}
+                      disabled={formData.bundleType === 'different_sizes_different_colors'}
                       className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                        formData.bundleType === 'different_sizes_different_colors' ? 'bg-gray-100 text-gray-400' :
                         formData.bundleType && !formData.colors ? 'border-red-300 bg-red-50' : 'border-gray-300'
                       }`}
-                      required={!!formData.bundleType}
+                      required={!!formData.bundleType && formData.bundleType !== 'different_sizes_different_colors'}
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      Comma separated values {formData.bundleType ? '(Required for bundles)' : ''}
+                      {formData.bundleType === 'different_sizes_different_colors' 
+                        ? 'Colors not needed for Mixed Size Mixed Color bundles'
+                        : `Comma separated values ${formData.bundleType ? '(Required for bundles)' : ''}`
+                      }
                     </p>
                   </div>
                 </div>
@@ -1010,36 +1039,28 @@ const AddProductPage = () => {
                 )}
 
                 {/* Mixed Bundle Configuration */}
-                {formData.bundleType === 'mixedSizeMixedColor' && formData.sizes && formData.colors && (
-                  <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                    <h4 className="font-medium text-yellow-800 mb-3">⚙️ Mixed Bundle Configuration</h4>
-                    <p className="text-sm text-yellow-700 mb-3">
-                      This bundle will create products for all size-color combinations using the total quantity specified above.
+                {formData.bundleType === 'mixedSizeMixedColor' && (
+                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                    <h4 className="font-medium text-green-800 mb-3">📦 Mixed Size & Color Bundle</h4>
+                    <p className="text-sm text-green-700 mb-3">
+                      This will create a single parent product representing a mixed bundle of different sizes and colors.
                     </p>
                     
-                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                      {formData.sizes.split(',').filter(s => s.trim()).map(size => 
-                        formData.colors.split(',').filter(c => c.trim()).map(color => (
-                          <div key={`${size.trim()}-${color.trim()}`} className="bg-white p-2 rounded border text-center">
-                            <div className="text-xs font-medium text-gray-700">
-                              {size.trim()}
-                            </div>
-                            <div className="text-xs text-gray-600">
-                              {color.trim()}
-                            </div>
-                          </div>
-                        ))
-                      ).flat()}
+                    <div className="bg-white p-3 rounded border">
+                      <div className="text-sm font-medium text-gray-700 mb-2">Bundle Details:</div>
+                      <div className="text-sm text-gray-600">
+                        • <strong>Product Type:</strong> Parent product only (no individual variants)
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        • <strong>Total Quantity:</strong> {formData.quantity || 0} mixed items
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        • <strong>Contents:</strong> Various sizes and colors in one bundle
+                      </div>
                     </div>
                     
-                    <div className="mt-3 text-sm text-yellow-700">
-                      <strong>Total Combinations: </strong>
-                      {formData.sizes.split(',').filter(s => s.trim()).length * formData.colors.split(',').filter(c => c.trim()).length} variants
-                    </div>
-                    
-                    <div className="mt-2 text-sm text-yellow-700">
-                      <strong>Total Quantity: </strong>
-                      {formData.quantity} items (will be distributed across all variants)
+                    <div className="mt-3 text-sm text-green-700 bg-green-100 p-2 rounded">
+                      <strong>Note:</strong> No child products will be created. This represents the entire mixed bundle as one item.
                     </div>
                   </div>
                 )}
@@ -1061,7 +1082,7 @@ const AddProductPage = () => {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <DollarSign className="h-5 w-5 mr-2" />
-                  💰 Pricing (Auto-calculated)
+                  💰 Pricing (Auto-calculated + Manual Override)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1084,58 +1105,128 @@ const AddProductPage = () => {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Offer Price
+                    <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
+                      <span>Offer Price</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleAutoCalculation('offerPrice')}
+                        className={`text-xs px-2 py-1 rounded transition-colors ${
+                          autoCalculation.offerPrice 
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {autoCalculation.offerPrice ? '🔄 Auto' : '✏️ Manual'}
+                      </button>
                     </label>
                     <input
-                      type="text"
+                      type="number"
                       name="offerPrice"
                       value={formData.offerPrice}
-                      readOnly
-                      placeholder="Auto calculated"
-                      className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg"
+                      onChange={handlePriceChange('offerPrice')}
+                      readOnly={autoCalculation.offerPrice}
+                      placeholder={autoCalculation.offerPrice ? "Auto calculated" : "Enter offer price"}
+                      step="0.01"
+                      min="0"
+                      className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                        autoCalculation.offerPrice ? 'bg-gray-100 text-gray-600' : 'bg-white'
+                      }`}
                     />
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Discounted Price
+                    <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
+                      <span>Discounted Price</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleAutoCalculation('discountedPrice')}
+                        className={`text-xs px-2 py-1 rounded transition-colors ${
+                          autoCalculation.discountedPrice 
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {autoCalculation.discountedPrice ? '🔄 Auto' : '✏️ Manual'}
+                      </button>
                     </label>
                     <input
-                      type="text"
+                      type="number"
                       name="discountedPrice"
                       value={formData.discountedPrice}
-                      readOnly
-                      placeholder="Auto calculated"
-                      className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg"
+                      onChange={handlePriceChange('discountedPrice')}
+                      readOnly={autoCalculation.discountedPrice}
+                      placeholder={autoCalculation.discountedPrice ? "Auto calculated" : "Enter discounted price"}
+                      step="0.01"
+                      min="0"
+                      className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                        autoCalculation.discountedPrice ? 'bg-gray-100 text-gray-600' : 'bg-white'
+                      }`}
                     />
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      MRP
+                    <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
+                      <span>MRP</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleAutoCalculation('mrp')}
+                        className={`text-xs px-2 py-1 rounded transition-colors ${
+                          autoCalculation.mrp 
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {autoCalculation.mrp ? '🔄 Auto' : '✏️ Manual'}
+                      </button>
                     </label>
                     <input
-                      type="text"
+                      type="number"
                       name="mrp"
                       value={formData.mrp}
-                      readOnly
-                      placeholder="Auto calculated"
-                      className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg"
+                      onChange={handlePriceChange('mrp')}
+                      readOnly={autoCalculation.mrp}
+                      placeholder={autoCalculation.mrp ? "Auto calculated" : "Enter MRP"}
+                      step="0.01"
+                      min="0"
+                      className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                        autoCalculation.mrp ? 'bg-gray-100 text-gray-600' : 'bg-white'
+                      }`}
                     />
                   </div>
                 </div>
                 
+                {/* Pricing Control Info */}
+                <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                  <h4 className="font-medium text-blue-800 mb-2">🔧 Pricing Controls:</h4>
+                  <div className="text-sm text-blue-700 space-y-1">
+                    <p>• <span className="font-medium">🔄 Auto:</span> Prices calculated automatically from Factory Price</p>
+                    <p>• <span className="font-medium">✏️ Manual:</span> Override auto-calculation with custom prices</p>
+                    <p>• Click the toggle buttons to switch between Auto and Manual modes</p>
+                  </div>
+                </div>
+
                 {/* Pricing Formula Display */}
                 {formData.factoryPrice && (
                   <div className="bg-green-50 p-3 rounded-lg border border-green-200">
-                    <h4 className="font-medium text-green-800 mb-2">💡 Pricing Formula:</h4>
+                    <h4 className="font-medium text-green-800 mb-2">💡 Auto-Calculation Formula:</h4>
                     <div className="text-sm text-green-700 space-y-1">
-                      <p>Factory Price: ₹{formData.factoryPrice}</p>
-                      <p>Profit Price: ₹{formData.factoryPrice} × 2 = ₹{(parseFloat(formData.factoryPrice) * 2).toFixed(2)}</p>
-                      <p>GST (5%): ₹{((parseFloat(formData.factoryPrice) * 2) * 0.05).toFixed(2)}</p>
-                      <p>Commission: ₹{(((parseFloat(formData.factoryPrice) * 2) * 1.05 / 500) * 30).toFixed(2)}</p>
-                      <p>Profit Margin: <span className="font-bold">{calculateMargin()}%</span></p>
+                      {(() => {
+                        const profitPrice = parseFloat(formData.factoryPrice) * 2;
+                        const gstRate = getGSTRate(profitPrice);
+                        const gstAmount = profitPrice * gstRate;
+                        const afterGst = profitPrice + gstAmount;
+                        const commission = (afterGst / 500) * 30;
+                        
+                        return (
+                          <>
+                            <p>Factory Price: ₹{formData.factoryPrice}</p>
+                            <p>Profit Price: ₹{formData.factoryPrice} × 2 = ₹{profitPrice.toFixed(2)}</p>
+                            <p>GST ({(gstRate * 100).toFixed(0)}%): ₹{gstAmount.toFixed(2)} {profitPrice > 2500 ? '(Above ₹2500)' : '(Below ₹2500)'}</p>
+                            <p>Commission: ₹{commission.toFixed(2)}</p>
+                            <p>Profit Margin: <span className="font-bold">{calculateMargin()}%</span></p>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}

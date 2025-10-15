@@ -4,9 +4,10 @@ const paymentService = {
   processPayment: async (paymentData) => {
     try {
       const response = await api.post('/payments', paymentData);
-      return response.data;
+      return response; // API interceptor already returns response.data
     } catch (error) {
       console.error('Payment service error:', error);
+      console.error('Error response:', error.response?.data);
       throw error;
     }
   },

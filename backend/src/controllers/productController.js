@@ -15,13 +15,36 @@ const getProducts = asyncHandler(async (req, res) => {
     query.$text = { $search: search };
   }
   
-  const products = await Product.find(query)
+  // Get all products without pagination to ensure parent-child integrity
+  const allProducts = await Product.find(query)
     .populate('category', 'name')
     .populate('subcategory', 'name')
     .populate('vendor', 'name')
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
     .sort({ createdAt: -1 });
+  
+  // Separate parents and children
+  const parents = allProducts.filter(p => p.type === 'parent' || p.type === 'standalone');
+  const children = allProducts.filter(p => p.type === 'child');
+  
+  // Get parent IDs that have children
+  const childParentIds = new Set(children.map(c => c.parentProduct?.toString()).filter(Boolean));
+  
+  // Ensure all parent products with children are included
+  const missingParents = [];
+  for (const parentId of childParentIds) {
+    if (!parents.find(p => p._id.toString() === parentId)) {
+      const parent = await Product.findById(parentId)
+        .populate('category', 'name')
+        .populate('subcategory', 'name')
+        .populate('vendor', 'name');
+      if (parent) {
+        missingParents.push(parent);
+      }
+    }
+  }
+  
+  // Combine all products ensuring parent-child integrity
+  const products = [...parents, ...children, ...missingParents];
   
   const total = await Product.countDocuments(query);
   
@@ -67,6 +90,11 @@ const createProduct = asyncHandler(async (req, res) => {
       ...req.body,
       createdBy: req.user.id
     };
+    
+    // Handle empty subcategory field
+    if (productData.subcategory === '' || productData.subcategory === null) {
+      delete productData.subcategory;
+    }
     
     // Check if this is a bundle product
     if (productData.bundle?.isBundle && productData.bundle?.bundleSize > 1) {

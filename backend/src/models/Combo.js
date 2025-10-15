@@ -4,7 +4,6 @@ const comboSchema = new mongoose.Schema({
   // Basic Information
   sku: {
     type: String,
-    required: true,
     unique: true,
     uppercase: true
   },
@@ -106,11 +105,30 @@ comboSchema.index({ paused: 1 });
 comboSchema.index({ validFrom: 1, validTo: 1 });
 
 // Generate combo SKU
-comboSchema.pre('save', function(next) {
-  if (this.isNew && !this.sku) {
-    // Auto-generate SKU similar to the JavaScript version
-    const seq = Math.floor(Math.random() * 9999).toString().padStart(4, '0');
-    this.sku = `CMB-${seq}`;
+comboSchema.pre('save', async function(next) {
+  if (this.isNew && (!this.sku || this.sku.trim() === '')) {
+    try {
+      // Find the highest existing SKU number
+      const existingCombos = await this.constructor.find({ sku: { $regex: /^CMB-\d{4}$/ } })
+        .sort({ sku: -1 })
+        .limit(10);
+      
+      let maxNumber = 0;
+      for (const combo of existingCombos) {
+        const numberPart = parseInt(combo.sku.substring(4));
+        if (!isNaN(numberPart) && numberPart > maxNumber) {
+          maxNumber = numberPart;
+        }
+      }
+      
+      const nextNumber = maxNumber + 1;
+      this.sku = `CMB-${nextNumber.toString().padStart(4, '0')}`;
+    } catch (error) {
+      console.error('Error generating SKU:', error);
+      // Fallback to random if database query fails
+      const seq = Math.floor(Math.random() * 9999).toString().padStart(4, '0');
+      this.sku = `CMB-${seq}`;
+    }
   }
   next();
 });

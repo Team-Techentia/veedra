@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Plus, Minus, Search, Trash2, ShoppingCart, Calculator, Barcode, User, Scan, Receipt, CreditCard, Banknote, Smartphone } from 'lucide-react';
+import { Plus, Minus, Search, X, ShoppingCart } from 'lucide-react';
 import toast from 'react-hot-toast';
 import productService from '../../services/productService';
 import comboService from '../../services/comboService';
@@ -8,47 +7,162 @@ import billingService from '../../services/billingService';
 import paymentService from '../../services/paymentService';
 import categoryService from '../../services/categoryService';
 
+// Utility functions - matches reference implementation
+const fmt = (n) => "₹" + Number(n || 0).toFixed(2);
+const toNumber = (v) => {
+  if (typeof v === "number") return v;
+  if (v === "" || v == null) return 0;
+  return Number(String(v).replace(/[^\d.-]/g, "")) || 0;
+};
+
+function computeStatus({ validFrom, validTo, paused }) {
+  const today = new Date();
+  const start = validFrom ? new Date(validFrom) : null;
+  const end = validTo ? new Date(validTo) : null;
+  if (paused) return "paused";
+  if (start && today < start) return "upcoming";
+  if (end && today > end) return "expired";
+  return "active";
+}
+
+// GST calculation function - reverse GST (GST is already included in price)
+function calculateGSTBreakdown(totalAmount, items = []) {
+  // Determine GST rate based on total bill amount (not individual items)
+  const gstRate = totalAmount > 2500 ? 12 : 5; // 12% or 5%
+  
+  // Reverse GST calculation (GST is already included in the selling price)
+  const gstAmount = (totalAmount * gstRate) / (100 + gstRate);
+  const baseAmount = totalAmount - gstAmount;
+  const sgst = gstAmount / 2;
+  const cgst = gstAmount / 2;
+  
+  return {
+    baseAmount: Math.round(baseAmount * 100) / 100,
+    totalGST: Math.round(gstAmount * 100) / 100,
+    sgst: Math.round(sgst * 100) / 100,
+    cgst: Math.round(cgst * 100) / 100,
+    gstRate,
+    sgstRate: gstRate / 2,
+    cgstRate: gstRate / 2,
+    // For compatibility with BillHistoryPage format
+    sgst5: gstRate === 5 ? Math.round(sgst * 100) / 100 : 0,
+    cgst5: gstRate === 5 ? Math.round(cgst * 100) / 100 : 0,
+    sgst12: gstRate === 12 ? Math.round(sgst * 100) / 100 : 0,
+    cgst12: gstRate === 12 ? Math.round(cgst * 100) / 100 : 0,
+    totalWithoutGST: Math.round(baseAmount * 100) / 100
+  };
+}
+
 const POSBillingPage = () => {
+  // State management - aligned with reference implementation
   const [products, setProducts] = useState([]);
   const [combos, setCombos] = useState([]);
-  const [cart, setCart] = useState([]);
-  const [selectedCombo, setSelectedCombo] = useState(null);
+  const [categories, setCategories] = useState([]);
+  
+  // Cart state - matches reference structure
+  const [cart, setCart] = useState([]); // Single products
+  const [selectedCombos, setSelectedCombos] = useState([]); // Applied combos
+  
+  // UI state
   const [searchTerm, setSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [qtyInput, setQtyInput] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [categories, setCategories] = useState([]);
+  
+  // Camera scanning state
+  const [isScanning, setIsScanning] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  
+  // Customer info
   const [customerInfo, setCustomerInfo] = useState({
     name: '',
-    phone: '',
-    email: ''
+    phone: ''
   });
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [receivedAmount, setReceivedAmount] = useState('');
+  
+  // Payment state
+  const [paymentAmounts, setPaymentAmounts] = useState({
+    cash: 0,
+    upi: 0
+  });
+  
+  // Loading and processing states
   const [loading, setLoading] = useState(true);
-  const [showPayment, setShowPayment] = useState(false);
-  const [showReceipt, setShowReceipt] = useState(false);
-  const [lastBill, setLastBill] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [lastBill, setLastBill] = useState(null);
+  
+  // Cart item ID generator for unique tracking
+  const [nextCartItemId, setNextCartItemId] = useState(1);
+  
+  // Refs
   const barcodeInputRef = useRef(null);
   const searchInputRef = useRef(null);
+  const scannerRef = useRef(null);
 
+  // Load initial data
   useEffect(() => {
     loadData();
   }, []);
 
+  // Focus on barcode input when component mounts
   useEffect(() => {
-    // Focus on barcode input when component mounts
     if (barcodeInputRef.current) {
       barcodeInputRef.current.focus();
     }
   }, []);
 
-  // Watch for cart changes to validate combo
+  // Migrate existing cart items to have cartItemId
   useEffect(() => {
-    if (selectedCombo && cart.length > 0) {
-      validateComboAfterCartChange();
+    if (cart.some(item => !item.cartItemId)) {
+      setCart(prev => prev.map(item => 
+        item.cartItemId ? item : { ...item, cartItemId: nextCartItemId }
+      ));
+      setNextCartItemId(prev => prev + cart.filter(item => !item.cartItemId).length);
     }
-  }, [cart.length]); // Only trigger on cart length changes
+  }, [cart, nextCartItemId]);
+
+  // Load QuaggaJS dynamically
+  useEffect(() => {
+    const loadQuagga = async () => {
+      try {
+        // Load QuaggaJS from CDN
+        if (!window.Quagga) {
+          const script = document.createElement('script');
+          script.src = 'https://unpkg.com/@ericblade/quagga2@1.2.6/dist/quagga.min.js';
+          script.async = true;
+          script.onload = () => {
+            console.log('QuaggaJS loaded successfully');
+          };
+          script.onerror = () => {
+            console.error('Failed to load QuaggaJS');
+            setCameraError('Camera scanning not available');
+          };
+          document.head.appendChild(script);
+        }
+      } catch (error) {
+        console.error('Error loading QuaggaJS:', error);
+        setCameraError('Camera scanning not available');
+      }
+    };
+
+    loadQuagga();
+
+    // Cleanup function to stop scanning when component unmounts
+    return () => {
+      if (window.Quagga && isScanning) {
+        window.Quagga.stop();
+      }
+    };
+  }, []);
+
+  // Cleanup scanner on unmount
+  useEffect(() => {
+    return () => {
+      if (window.Quagga && isScanning) {
+        window.Quagga.stop();
+        setIsScanning(false);
+      }
+    };
+  }, [isScanning]);
 
   const loadData = async () => {
     setLoading(true);
@@ -63,64 +177,13 @@ const POSBillingPage = () => {
       setCategories(categoriesData.data || categoriesData || []);
     } catch (error) {
       console.error('Error loading data:', error);
+      toast.error('Failed to load data');
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle barcode input
-  const handleBarcodeInput = async (e) => {
-    if (e.key === 'Enter' && barcodeInput.trim()) {
-      e.preventDefault();
-      
-      try {
-        // First try to find in loaded products
-        let product = products.find(p => 
-          p.barcode === barcodeInput.trim() || 
-          p.code === barcodeInput.trim() ||
-          p.productCode === barcodeInput.trim()
-        );
-        
-        // If not found locally, try scanning via API
-        if (!product) {
-          try {
-            const scannedResult = await productService.scanProductByBarcode(barcodeInput.trim());
-            product = scannedResult.data;
-          } catch (scanError) {
-            console.error('Barcode scan error:', scanError);
-          }
-        }
-        
-        if (product) {
-          // Check if product has stock
-          if ((product.inventory?.currentStock || 0) <= 0) {
-            toast.error('Product is out of stock!');
-          } else {
-            addToCart(product);
-            toast.success(`Added ${product.name} to cart`);
-          }
-        } else {
-          toast.error('Product not found with this barcode!');
-        }
-      } catch (error) {
-        console.error('Error processing barcode:', error);
-        toast.error('Failed to process barcode');
-      }
-      
-      setBarcodeInput('');
-    }
-  };
-
-  // Quick add product by Enter key
-  const handleProductSearch = (e) => {
-    if (e.key === 'Enter' && filteredProducts.length === 1) {
-      e.preventDefault();
-      addToCart(filteredProducts[0]);
-      setSearchTerm('');
-      barcodeInputRef.current?.focus();
-    }
-  };
-
+  // Product search and filtering - matches reference
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (product.productCode && product.productCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -131,32 +194,229 @@ const POSBillingPage = () => {
     return matchesSearch && matchesCategory && product.isActive && (product.inventory?.currentStock || 0) > 0;
   });
 
-  const addToCart = (product) => {
-    const existingItem = cart.find(item => item._id === product._id);
-    
-    if (existingItem) {
-      if (existingItem.quantity < (product.inventory?.currentStock || 0)) {
-        setCart(cart.map(item =>
-          item._id === product._id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        ));
+  // Find product by code/barcode - matches reference
+  const findProductByCode = (code) => {
+    return products.find(p => 
+      (p.code || p.sku || p.productCode || "").toString() === code.toString() ||
+      (p.barcode || "").toString() === code.toString()
+    );
+  };
+
+  // Handle barcode input - matches reference Enter key behavior
+  const handleBarcodeInput = async (e) => {
+    if (e.key === 'Enter' && barcodeInput.trim()) {
+      e.preventDefault();
+      
+      const product = findProductByCode(barcodeInput.trim());
+      
+      if (product) {
+        if ((product.inventory?.currentStock || 0) <= 0) {
+          toast.error('Product is out of stock!');
+        } else {
+          assignScannedProduct(product, qtyInput);
+        }
       } else {
-        toast.error('Insufficient stock');
+        // Allow manual product entry - matches reference behavior
+        if (window.confirm("Product not found in catalog. Add as free-text single item?")) {
+          const customName = window.prompt("Enter product name:") || ("Item " + barcodeInput);
+          const customPrice = Number(window.prompt("Enter MRP:") || 0);
+          
+          const customProduct = {
+            _id: 'custom_' + Date.now(),
+            name: customName,
+            productCode: barcodeInput,
+            pricing: { offerPrice: customPrice },
+            inventory: { currentStock: 999 },
+            isActive: true
+          };
+          
+          // Add to products temporarily
+          setProducts(prev => [...prev, customProduct]);
+          assignScannedProduct(customProduct, qtyInput);
+        }
       }
-    } else {
-      setCart([...cart, {
-        ...product,
-        quantity: 1,
-        price: product.pricing?.offerPrice || 0, // Default to offer price
-        offerPrice: product.pricing?.offerPrice || 0,
-        discountedPrice: product.pricing?.discountedPrice || 0,
-        mrp: product.pricing?.mrp || 0,
-        isComboApplied: false // Track if this item has combo applied
-      }]);
+      
+      setBarcodeInput('');
+      setQtyInput(1);
     }
   };
 
+  // Assignment logic - Auto-assign to active combo first
+  const assignScannedProduct = (product, qty = 1) => {
+    let assigned = false;
+    const productMRP = product.pricing?.offerPrice || product.price || 0;
+
+    // Strategy: Try most recent combo first (last added), then work backwards
+    for (let comboIndex = selectedCombos.length - 1; comboIndex >= 0; comboIndex--) {
+      const combo = selectedCombos[comboIndex];
+      
+      // Find unfilled slots in this combo
+      const unfilledSlots = combo.slots?.filter(slot => !slot.assigned) || [];
+      
+      if (unfilledSlots.length === 0) continue; // Skip filled combos
+      
+      // Try to find the first available slot that accepts this product
+      for (let slot of unfilledSlots) {
+        const minPrice = slot.minPrice || 0;
+        const maxPrice = slot.maxPrice || 999999;
+        
+        // Accept if no price constraints or within range
+        const fitsSlot = (minPrice === 0 && maxPrice === 0) || 
+                        (productMRP >= minPrice && productMRP <= maxPrice);
+        
+        if (fitsSlot) {
+          // Assign product to this slot
+          // Find cart item for this product
+          const cartItem = cart.find(item => item._id === product._id);
+          slot.assigned = {
+            product: product,
+            qty: 1, // Only 1 unit gets combo pricing
+            cartItemId: cartItem?.cartItemId
+          };
+          
+          // Update selectedCombos
+          setSelectedCombos(prev => prev.map((c, idx) => 
+            idx === comboIndex ? combo : c
+          ));
+          
+          assigned = true;
+          
+          // Check if combo is now complete
+          const isComboComplete = combo.slots?.every(s => s.assigned);
+          if (isComboComplete) {
+            // Combo completed - no notification needed
+          } else {
+            const remainingSlots = combo.slots?.filter(s => !s.assigned).length || 0;
+
+          }
+          
+          break;
+        }
+      }
+      
+      if (assigned) break;
+    }
+
+    if (!assigned) {
+      // Add to single products
+      const existingItem = cart.find(item => item._id === product._id);
+      
+      if (existingItem) {
+        if (existingItem.quantity + qty <= (product.inventory?.currentStock || 0)) {
+          setCart(prev => prev.map(item =>
+            item._id === product._id
+              ? { ...item, quantity: item.quantity + qty }
+              : item
+          ));
+          toast.success(`Updated ${product.name} quantity to ${existingItem.quantity + qty}`);
+        } else {
+          toast.error('Insufficient stock');
+        }
+      } else {
+        setCart(prev => [...prev, {
+          ...product,
+          quantity: qty,
+          price: productMRP,
+          isComboApplied: false,
+          cartItemId: nextCartItemId
+        }]);
+        setNextCartItemId(prev => prev + 1);
+        
+        if (selectedCombos.length > 0) {
+
+        } else {
+
+        }
+      }
+    }
+  };
+
+  // Add combo to bill - Auto-assignment enabled
+  const addComboToBill = (combo) => {
+    const status = computeStatus({
+      validFrom: combo.validFrom,
+      validTo: combo.validTo,
+      paused: combo.paused
+    });
+    
+    if (status !== 'active') {
+
+      return;
+    }
+
+    // Check if combo is already applied
+    if (selectedCombos.find(c => c._id === combo._id)) {
+      // Allow multiple instances of the same combo
+    }
+
+    // Create combo instance with empty slots
+    const slots = (combo.rules?.slots || []).map(slot => ({
+      minPrice: Number(slot.minPrice || 0),
+      maxPrice: Number(slot.maxPrice || 0),
+      assigned: null
+    }));
+
+    const comboInstance = {
+      _id: combo._id,
+      sku: combo.sku,
+      name: combo.name,
+      offerPrice: Number(combo.offerPrice || 0),
+      qtyProducts: Number(combo.qtyProducts || slots.length || 0),
+      slots: slots,
+      notes: combo.notes || ""
+    };
+
+    setSelectedCombos(prev => [...prev, comboInstance]);
+    
+    // Enhanced feedback
+    const slotCount = slots.length;
+
+    
+    // Auto-focus search input for immediate product scanning
+    if (searchInputRef.current) {
+      setTimeout(() => {
+        searchInputRef.current.focus();
+      }, 100);
+    }
+  };
+
+  // Remove combo - matches reference
+  const removeComboInstance = (comboToRemove) => {
+    if (!window.confirm("Remove this combo from the bill?")) return;
+    
+    // Move assigned products back to singles
+    comboToRemove.slots?.forEach(slot => {
+      if (slot.assigned) {
+        const product = slot.assigned.product;
+        const qty = slot.assigned.qty;
+        
+        // Add back to cart as single
+        const existingItem = cart.find(item => item._id === product._id);
+        if (existingItem) {
+          setCart(prev => prev.map(item =>
+            item._id === product._id
+              ? { ...item, quantity: item.quantity + qty }
+              : item
+          ));
+        } else {
+          setCart(prev => [...prev, {
+            ...product,
+            quantity: qty,
+            price: product.pricing?.offerPrice || 0,
+            isComboApplied: false,
+            cartItemId: nextCartItemId
+          }]);
+          setNextCartItemId(prev => prev + 1);
+        }
+      }
+    });
+    
+    // Remove combo
+    setSelectedCombos(prev => prev.filter(combo => combo._id !== comboToRemove._id));
+
+  };
+
+  // Update quantity
   const updateQuantity = (productId, newQuantity) => {
     if (newQuantity === 0) {
       removeFromCart(productId);
@@ -165,1181 +425,1584 @@ const POSBillingPage = () => {
 
     const product = products.find(p => p._id === productId);
     if (!product || newQuantity > (product.inventory?.currentStock || 0)) {
-      alert('Insufficient stock');
+      toast.error('Insufficient stock');
       return;
     }
 
-    setCart(cart.map(item =>
+    setCart(prev => prev.map(item =>
       item._id === productId
         ? { ...item, quantity: newQuantity }
         : item
     ));
-    
-    // Check if combo is still valid after quantity change
-    validateComboAfterCartChange();
   };
 
+  // Remove from cart
   const removeFromCart = (productId) => {
-    setCart(cart.filter(item => item._id !== productId));
-    // Check if combo is still valid after removing item
-    validateComboAfterCartChange();
+    setCart(prev => prev.filter(item => item._id !== productId));
   };
 
-  // Update cart pricing based on combo application
-  const updateCartPricing = (comboApplied = false) => {
-    if (!comboApplied) {
-      // No combo - all items at offer price
-      setCart(prevCart => 
-        prevCart.map(item => ({
-          ...item,
-          price: item.offerPrice || 0,
-          isComboApplied: false,
-          itemsInCombo: 0,
-          itemsAtOfferPrice: item.quantity
-        }))
-      );
-      return;
-    }
 
-    // Combo applied - calculate which items are in combo vs at offer price
-    const requiredQty = selectedCombo?.qtyProducts || 1;
-    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-    const comboSets = Math.floor(totalCartQty / requiredQty);
-    let itemsProcessedForCombo = 0;
+  
 
-    setCart(prevCart => 
-      prevCart.map(item => {
-        const itemsInCombo = Math.min(
-          item.quantity, 
-          Math.max(0, requiredQty * comboSets - itemsProcessedForCombo)
-        );
-        const itemsAtOfferPrice = item.quantity - itemsInCombo;
-        
-        itemsProcessedForCombo += itemsInCombo;
 
-        return {
-          ...item,
-          price: item.discountedPrice || item.offerPrice || 0, // Show discounted price for display
-          isComboApplied: itemsInCombo > 0,
-          itemsInCombo: itemsInCombo,
-          itemsAtOfferPrice: itemsAtOfferPrice
-        };
-      })
-    );
-  };
-
-  // Validate if current combo is still applicable after cart changes
-  const validateComboAfterCartChange = () => {
-    if (!selectedCombo) return;
-
-    // Check minimum quantity requirement
-    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-    const requiredQty = selectedCombo.qtyProducts || 1;
-    
-    if (totalCartQty < requiredQty) {
-      setSelectedCombo(null);
-      updateCartPricing(false); // Switch back to offer prices
-      toast.error(`Combo removed: Need at least ${requiredQty} items`);
-      return;
-    }
-
-    // Check if cart total is still within combo price slots
-    const discountedCartTotal = cart.reduce((sum, item) => {
-      const itemDiscountedPrice = item.discountedPrice || item.offerPrice || 0;
-      return sum + (itemDiscountedPrice * item.quantity);
-    }, 0);
-    
-    const slots = selectedCombo.rules?.slots || [];
-    if (slots.length > 0) {
-      const isWithinSlots = slots.some(slot => 
-        discountedCartTotal >= slot.minPrice && discountedCartTotal <= slot.maxPrice
-      );
-      
-      if (!isWithinSlots) {
-        setSelectedCombo(null);
-        updateCartPricing(false);
-        toast.error('Combo removed: Cart total no longer within valid price range');
-        return;
-      }
-    }
-  };
-
-  const calculateSubtotal = () => {
-    return cart.reduce((sum, item) => sum + ((item.price || 0) * item.quantity), 0);
-  };
-
-  const calculateTax = () => {
-    return cart.reduce((sum, item) => {
-      const itemTotal = (item.price || 0) * item.quantity;
-      // Use GST rate from product or default 18% GST
-      const taxRate = (item.gstRate || 18) / 100;
-      return sum + (itemTotal * taxRate);
-    }, 0);
-  };
-
-  const calculateTotal = () => {
-    if (selectedCombo) {
-      // Calculate how many combo sets can be applied
-      const requiredQty = selectedCombo.qtyProducts || 1;
-      const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-      const comboSets = Math.floor(totalCartQty / requiredQty);
-      const remainingItems = totalCartQty % requiredQty;
-      
-      // Price for combo sets
-      const comboPrice = (selectedCombo.offerPrice || 0) * comboSets;
-      
-      // Price for remaining items (at offer price)
-      let remainingPrice = 0;
-      let itemsProcessed = 0;
-      
-      for (const item of cart) {
-        const itemsInCombo = Math.min(item.quantity, requiredQty * comboSets - itemsProcessed);
-        const itemsAtOfferPrice = item.quantity - itemsInCombo;
-        
-        if (itemsAtOfferPrice > 0) {
-          remainingPrice += (item.offerPrice || 0) * itemsAtOfferPrice;
-        }
-        
-        itemsProcessed += itemsInCombo;
-        if (itemsProcessed >= requiredQty * comboSets) break;
-      }
-      
-      const subtotal = comboPrice + remainingPrice;
-      const tax = calculateTax();
-      return subtotal + tax;
-    } else {
-      // When no combo, use regular calculation with offer prices
-      const subtotal = calculateSubtotal();
-      const tax = calculateTax();
-      return subtotal + tax;
-    }
-  };
-
-  const calculateComboSavings = (combo) => {
-    if (!combo) return 0;
-    
-    const requiredQty = combo.qtyProducts || 1;
-    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-    
-    // Check if cart has minimum required quantity
-    if (totalCartQty < requiredQty) {
-      return 0;
-    }
-    
-    // Calculate how many combo sets can be applied
-    const comboSets = Math.floor(totalCartQty / requiredQty);
-    
-    // Calculate what the combo items would cost at discounted prices
-    let discountedComboPrice = 0;
-    let itemsProcessed = 0;
-    
-    for (const item of cart) {
-      const itemsInCombo = Math.min(item.quantity, requiredQty * comboSets - itemsProcessed);
-      if (itemsInCombo > 0) {
-        const itemDiscountedPrice = item.discountedPrice || item.offerPrice || 0;
-        discountedComboPrice += itemDiscountedPrice * itemsInCombo;
-      }
-      
-      itemsProcessed += itemsInCombo;
-      if (itemsProcessed >= requiredQty * comboSets) break;
-    }
-    
-    // Calculate actual combo cost
-    const actualComboPrice = (combo.offerPrice || 0) * comboSets;
-    
-    // Savings = what items would cost at discounted price - actual combo price
-    return Math.max(0, discountedComboPrice - actualComboPrice);
-  };
-
-  const applyCombo = (combo) => {
-    if (combo.paused) {
-      toast.error('This combo is currently paused');
-      return;
-    }
-    
-    // Check if combo is within valid date range
-    const now = new Date();
-    if (combo.validFrom && new Date(combo.validFrom) > now) {
-      toast.error('This combo is not yet active');
-      return;
-    }
-    if (combo.validTo && new Date(combo.validTo) < now) {
-      toast.error('This combo has expired');
-      return;
-    }
-    
-    // Check minimum quantity requirement
-    const requiredQty = combo.qtyProducts || 1;
-    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-    
-    if (totalCartQty < requiredQty) {
-      toast.error(`Add at least ${requiredQty} products to cart to use this combo`);
-      return;
-    }
-    
-    // Check if cart total (based on DISCOUNTED PRICES) is within combo price slots
-    const discountedCartTotal = cart.reduce((sum, item) => {
-      const itemDiscountedPrice = item.discountedPrice || item.price || 0;
-      return sum + (itemDiscountedPrice * item.quantity);
-    }, 0);
-    const slots = combo.rules?.slots || [];
-    
-    if (slots.length > 0) {
-      let isWithinSlots = false;
-      for (const slot of slots) {
-        if (discountedCartTotal >= slot.minPrice && discountedCartTotal <= slot.maxPrice) {
-          isWithinSlots = true;
-          break;
-        }
-      }
-      
-      if (!isWithinSlots) {
-        const slotRanges = slots.map(slot => `₹${slot.minPrice}-₹${slot.maxPrice}`).join(', ');
-        toast.error(`Cart total (discounted prices) should be within combo price ranges: ${slotRanges}`);
-        return;
-      }
-    }
-    
-    setSelectedCombo(combo);
-    updateCartPricing(true); // Switch to discounted prices
-    
-    // Calculate savings after price update
-    setTimeout(() => {
-      const savings = calculateComboSavings(combo);
-      toast.success(`${combo.name} applied! Savings: ₹${savings.toFixed(0)}`);
-    }, 0);
-  };
-
-  const removeCombo = () => {
-    setSelectedCombo(null);
-    updateCartPricing(false); // Switch back to offer prices
-    toast.success('Combo removed');
-  };
-
-  const calculateComboDiscount = () => {
-    if (selectedCombo) {
-      return calculateComboSavings(selectedCombo);
-    }
-    return 0;
-  };
-
-  const proceedToPayment = () => {
-    if (cart.length === 0) {
-      toast.error('Cart is empty');
-      return;
-    }
-    setShowPayment(true);
-  };
-
-  const handlePayment = async () => {
-    if (cart.length === 0) {
-      toast.error('Cart is empty');
-      return;
-    }
-
-    if (!paymentMethod) {
-      toast.error('Please select a payment method');
-      return;
-    }
-
-    const calculatedTotal = calculateTotal();
-    if (paymentMethod === 'cash' && parseFloat(receivedAmount) < calculatedTotal) {
-      toast.error('Insufficient cash received');
-      return;
-    }
-
-    setProcessing(true);
-    try {
-      const paymentData = {
-        cartItems: cart,
-        paymentMethod: paymentMethod,
-        amount: calculatedTotal,
-        receivedAmount: paymentMethod === 'cash' ? parseFloat(receivedAmount) : calculatedTotal,
-        customerInfo: {
-          name: customerInfo.name,
-          phone: customerInfo.phone,
-          email: customerInfo.email
-        },
-        combos: selectedCombo ? [{
-          comboId: selectedCombo._id,
-          comboName: selectedCombo.name,
-          discount: calculateComboDiscount()
-        }] : []
-      };
-
-      console.log('Processing payment with data:', paymentData);
-      const result = await paymentService.processPayment(paymentData);
-      
-      if (result.success) {
-        toast.success('Payment processed successfully!');
-        
-        const changeAmount = result.data.changeAmount || 0;
-        if (changeAmount > 0) {
-          toast.success(`Change: ₹${changeAmount.toFixed(2)}`);
-        }
-        
-        // Set bill data for receipt
-        setLastBill({
-          billNumber: result.data.billNumber,
-          transactionId: result.data.transactionId,
-          date: new Date(),
-          customer: customerInfo,
-          items: cart,
-          subtotal: calculateSubtotal(),
-          tax: calculateTax(),
-          discount: calculateComboDiscount(),
-          total: calculatedTotal,
-          paymentMethod,
-          receivedAmount: paymentMethod === 'cash' ? parseFloat(receivedAmount) : calculatedTotal,
-          change: changeAmount,
-          combo: selectedCombo
+  // Calculate totals using cart item IDs for precise tracking
+  const calculateSinglesSubtotal = () => {
+    // Get set of cart item IDs that are assigned to combos
+    const assignedCartItemIds = new Set();
+    selectedCombos.forEach(combo => {
+      if (combo.slots) {
+        combo.slots.forEach(slot => {
+          if (slot.assigned && slot.assigned.cartItemId) {
+            assignedCartItemIds.add(slot.assigned.cartItemId);
+          }
         });
+      }
+    });
+
+    let singlesTotal = 0;
+    cart.forEach(item => {
+      // If this cart item is assigned to a combo, reduce quantity by 1
+      const quantityForSingles = assignedCartItemIds.has(item.cartItemId) 
+        ? Math.max(0, item.quantity - 1)  // Reduce by 1 for combo assignment
+        : item.quantity; // All quantity counts as singles
+      
+      singlesTotal += quantityForSingles * (item.price || 0);
+    });
+    return singlesTotal;
+  };
+
+  const calculateCombosSubtotal = () => {
+    const combosTotal = selectedCombos.reduce((sum, combo) => {
+      const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+      const comboPrice = allSlotsFilled ? Number(combo.offerPrice || 0) : 0;
+      return sum + comboPrice;
+    }, 0);
+    
+    return combosTotal;
+  };
+
+  // Calculate adjusted price for a product in a combo using the formula:
+  // Adjusted Price = (Product MRP / Total MRP) × Combo Price
+  const calculateAdjustedPrice = (combo, slot) => {
+    if (!combo || !slot || !slot.assigned) return 0;
+    
+    const allSlotsFilled = combo.slots?.every(s => s.assigned) || false;
+    if (!allSlotsFilled) return Number(slot.assigned.product.pricing?.offerPrice || 0);
+    
+    // Calculate total MRP of all assigned products
+    const totalMRP = combo.slots.reduce((sum, s) => {
+      if (s.assigned) {
+        return sum + Number(s.assigned.product.pricing?.offerPrice || 0) * (s.assigned.qty || 1);
+      }
+      return sum;
+    }, 0);
+    
+    if (totalMRP === 0) return 0;
+    
+    // Apply the formula: (Product MRP / Total MRP) × Combo Price
+    const productMRP = Number(slot.assigned.product.pricing?.offerPrice || 0) * (slot.assigned.qty || 1);
+    const comboPrice = Number(combo.offerPrice || 0);
+    const adjustedPrice = (productMRP / totalMRP) * comboPrice;
+    
+    // Round to 2 decimals (or nearest ₹1 for simplicity)
+    return Math.round(adjustedPrice);
+  };
+
+  const calculateTotalSavings = () => {
+    return selectedCombos.reduce((totalSavings, combo) => {
+      const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+      if (!allSlotsFilled) return totalSavings;
+      
+      // Calculate original total MRP
+      const sumMRP = combo.slots.reduce((sum, slot) => {
+        if (slot.assigned) {
+          return sum + Number(slot.assigned.product.pricing?.offerPrice || 0) * (slot.assigned.qty || 1);
+        }
+        return sum;
+      }, 0);
+      
+      // Savings = Original Total - Combo Offer Price
+      return totalSavings + Math.max(0, sumMRP - Number(combo.offerPrice || 0));
+    }, 0);
+  };
+
+  const calculateGrandTotal = () => {
+    return calculateSinglesSubtotal() + calculateCombosSubtotal();
+  };
+
+  // Camera scanning functions
+  const startCameraScanning = async () => {
+    if (isScanning) return;
+    
+    // Check for camera permission first
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach(track => track.stop()); // Stop the test stream
+    } catch (error) {
+      toast.error('Camera permission denied or not available');
+      setCameraError('Camera access denied');
+      return;
+    }
+    
+    if (!window.Quagga) {
+      toast.error('Camera scanning not available. QuaggaJS not loaded.');
+      return;
+    }
+
+    if (!scannerRef.current) {
+      toast.error('Scanner element not found');
+      return;
+    }
+
+    setIsScanning(true);
+    setCameraError('');
+
+    const config = {
+      inputStream: {
+        name: "Live",
+        type: "LiveStream",
+        target: scannerRef.current,
+        constraints: {
+          width: { min: 160, ideal: 320 },
+          height: { min: 120, ideal: 240 },
+          aspectRatio: { min: 1, max: 2 },
+          facingMode: "environment" // Use back camera if available
+        }
+      },
+      decoder: {
+        readers: [
+          "code_128_reader",
+          "ean_reader",
+          "ean_8_reader",
+          "code_39_reader",
+          "code_39_vin_reader",
+          "codabar_reader",
+          "upc_reader",
+          "upc_e_reader"
+        ],
+        debug: {
+          drawBoundingBox: false,
+          showFrequency: false,
+          drawScanline: false,
+          showPattern: false
+        }
+      },
+      locate: true,
+      locator: {
+        patchSize: "medium",
+        halfSample: true
+      },
+      numOfWorkers: navigator.hardwareConcurrency || 4,
+      frequency: 10,
+      debug: false
+    };
+
+    window.Quagga.init(config, (err) => {
+      if (err) {
+        console.error('Quagga initialization error:', err);
+        setIsScanning(false);
+        setCameraError('Camera initialization failed');
+        toast.error('Camera initialization failed: ' + (err.message || 'Unknown error'));
+        return;
+      }
+      
+      console.log('Quagga initialized successfully');
+      window.Quagga.start();
+      toast.success('Camera scanning started - Point at barcode');
+    });
+
+    // Handle barcode detection
+    window.Quagga.onDetected((result) => {
+      const code = result.codeResult.code;
+      console.log('Barcode detected:', code);
+      
+      // Validate barcode (basic check)
+      if (code && code.length >= 3) {
+        // Set the barcode input and trigger product search
+        setBarcodeInput(code);
         
-        // Reset everything
-        setCart([]);
-        setSelectedCombo(null);
-        setCustomerInfo({ name: '', phone: '', email: '' });
-        setPaymentMethod('cash');
-        setReceivedAmount('');
-        setShowPayment(false);
-        setShowReceipt(true);
-        
-        // Focus back to barcode input
+        // Auto-add the product
         setTimeout(() => {
-          barcodeInputRef.current?.focus();
+          handleBarcodeInput({ key: 'Enter', preventDefault: () => {} });
         }, 100);
         
+        // Stop scanning after detection to avoid duplicates
+        stopCameraScanning();
+        
+        // Visual feedback
+        toast.success(`Scanned: ${code}`);
       } else {
-        toast.error(result.message || 'Payment failed');
+        console.warn('Invalid barcode detected:', code);
       }
+    });
+
+    // Handle processing errors
+    window.Quagga.onProcessed((result) => {
+      if (result && result.boxes) {
+        // Could add visual feedback here if needed
+      }
+    });
+  };
+
+  const stopCameraScanning = () => {
+    if (!isScanning) return;
+    
+    if (window.Quagga) {
+      try {
+        window.Quagga.stop();
+        window.Quagga.offDetected();
+        window.Quagga.offProcessed();
+        console.log('Camera scanning stopped');
+      } catch (error) {
+        console.error('Error stopping camera:', error);
+      }
+    }
+    
+    setIsScanning(false);
+    toast.info('Camera scanning stopped');
+  };
+
+  // Request camera permissions
+  const requestCameraPermission = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: "environment",
+          width: { ideal: 320 },
+          height: { ideal: 240 }
+        } 
+      });
+      
+      // Stop the stream immediately as we just wanted to get permission
+      stream.getTracks().forEach(track => track.stop());
+      
+      setCameraError('');
+      toast.success('Camera permission granted');
+      return true;
     } catch (error) {
-      console.error('Payment error:', error);
-      toast.error(
-        error.response?.data?.message || 
-        'Payment processing failed. Please try again.'
-      );
-    } finally {
-      setProcessing(false);
+      console.error('Camera permission error:', error);
+      
+      let errorMessage = 'Camera access denied';
+      if (error.name === 'NotFoundError') {
+        errorMessage = 'No camera found';
+      } else if (error.name === 'NotAllowedError') {
+        errorMessage = 'Camera permission denied';
+      } else if (error.name === 'NotReadableError') {
+        errorMessage = 'Camera already in use';
+      }
+      
+      setCameraError(errorMessage);
+      toast.error(errorMessage);
+      return false;
     }
   };
 
-  const printReceipt = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('Please allow popups to print receipt');
-      return;
+  // Clear bill
+  const clearBill = () => {
+    if (!window.confirm("Clear the current bill?")) return;
+    
+    // Stop scanning if active
+    if (isScanning) {
+      stopCameraScanning();
     }
-
-    const receiptHTML = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Receipt - ${lastBill.billNumber}</title>
-          <style>
-            @page { margin: 10mm; }
-            body { 
-              font-family: 'Courier New', monospace; 
-              font-size: 12px; 
-              line-height: 1.4;
-              margin: 0;
-              padding: 10px;
-            }
-            .center { text-align: center; }
-            .bold { font-weight: bold; }
-            .divider { border-top: 1px dashed #000; margin: 8px 0; }
-            .flex-between { display: flex; justify-content: space-between; }
-            .item-line { margin: 2px 0; }
-            .total-line { border-top: 1px solid #000; padding-top: 5px; margin-top: 5px; }
-            @media print {
-              body { margin: 0; }
-              .no-print { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="center">
-            <div class="bold" style="font-size: 16px;">YOUR STORE NAME</div>
-            <div>123 Store Address, City</div>
-            <div>Phone: +91 98765 43210</div>
-            <div>GST: 27XXXXX1234X1ZX</div>
-          </div>
-          
-          <div class="divider"></div>
-          
-          <div class="flex-between">
-            <span>Bill No: ${lastBill.billNumber}</span>
-            <span>Date: ${new Date(lastBill.date).toLocaleString()}</span>
-          </div>
-          
-          ${(lastBill.customer.name || lastBill.customer.phone) ? `
-          <div>
-            <strong>Customer:</strong><br>
-            ${lastBill.customer.name || 'N/A'}<br>
-            ${lastBill.customer.phone || 'N/A'}
-          </div>
-          <div class="divider"></div>
-          ` : ''}
-          
-          <div style="margin: 10px 0;">
-            <div class="flex-between bold">
-              <span>Item</span>
-              <span>Qty</span>
-              <span>Rate</span>
-              <span>Amount</span>
-            </div>
-            <div class="divider"></div>
-            
-            ${lastBill.items.map(item => `
-              <div class="item-line">
-                <div>${item.name}</div>
-                <div class="flex-between">
-                  <span>${item.quantity} x ₹${item.price.toLocaleString()}</span>
-                  <span class="bold">₹${(item.price * item.quantity).toLocaleString()}</span>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-          
-          <div class="total-line">
-            <div class="flex-between">
-              <span>Subtotal:</span>
-              <span>₹${lastBill.subtotal.toLocaleString()}</span>
-            </div>
-            ${lastBill.combo ? `
-            <div class="flex-between" style="color: #008000;">
-              <span>Combo Discount (${lastBill.combo.name}):</span>
-              <span>-₹${calculateComboDiscount().toLocaleString()}</span>
-            </div>
-            ` : ''}
-            <div class="flex-between">
-              <span>Tax (GST):</span>
-              <span>₹${lastBill.tax.toLocaleString()}</span>
-            </div>
-            <div class="flex-between bold" style="font-size: 14px;">
-              <span>TOTAL:</span>
-              <span>₹${lastBill.total.toLocaleString()}</span>
-            </div>
-          </div>
-          
-          <div class="divider"></div>
-          
-          <div>
-            <div class="flex-between">
-              <span>Payment Method:</span>
-              <span class="bold">${lastBill.paymentMethod.toUpperCase()}</span>
-            </div>
-            ${lastBill.paymentMethod === 'cash' ? `
-            <div class="flex-between">
-              <span>Received:</span>
-              <span>₹${lastBill.receivedAmount.toLocaleString()}</span>
-            </div>
-            <div class="flex-between">
-              <span>Change:</span>
-              <span>₹${lastBill.change.toLocaleString()}</span>
-            </div>
-            ` : ''}
-          </div>
-          
-          <div class="divider"></div>
-          
-          <div class="center">
-            <div>Thank you for shopping with us!</div>
-            <div>Visit again soon</div>
-            <div style="margin-top: 10px; font-size: 10px;">
-              Printed on: ${new Date().toLocaleString()}
-            </div>
-          </div>
-          
-          <div class="no-print" style="text-align: center; margin-top: 20px;">
-            <button onclick="window.print(); window.close();" 
-                    style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
-              Print Receipt
-            </button>
-            <button onclick="window.close();" 
-                    style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
-              Close
-            </button>
-          </div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(receiptHTML);
-    printWindow.document.close();
-    printWindow.focus();
-  };
-
-  const newSale = () => {
-    setShowReceipt(false);
-    setLastBill(null);
+    
     setCart([]);
-    setSelectedCombo(null);
-    setCustomerInfo({ name: '', phone: '', email: '' });
-    setPaymentMethod('cash');
-    setReceivedAmount('');
-    setSearchTerm('');
+    setSelectedCombos([]);
+    setCustomerInfo({ name: '', phone: '' });
+    setPaymentAmounts({ cash: 0, upi: 0 });
     setBarcodeInput('');
-    setSelectedCategory('');
+    setSearchTerm('');
+    
     setTimeout(() => {
       barcodeInputRef.current?.focus();
     }, 100);
   };
 
+  // Finalize and print - matches reference
+  const finalizeAndPrint = async () => {
+    if (cart.length === 0 && selectedCombos.length === 0) {
+      toast.error('Cart is empty');
+      return;
+    }
+
+    // Validate customer info
+    const mobile = customerInfo.phone.trim();
+    const name = customerInfo.name.trim() || "Customer";
+    
+    if (mobile && !/^\d{10}$/.test(mobile)) {
+      if (!window.confirm("Customer mobile invalid. Continue without saving customer?")) return;
+    }
+
+    const totalAmount = calculateGrandTotal();
+    const paidAmount = Number(paymentAmounts.cash) + Number(paymentAmounts.upi);
+    
+    if (paidAmount < totalAmount) {
+      if (!window.confirm(`Paid amount ₹${paidAmount.toFixed(2)} is less than bill total ₹${totalAmount.toFixed(2)}. Proceed and record as due?`)) return;
+    }
+
+    setProcessing(true);
+    
+    try {
+      // Prepare final items for billing
+      const finalItems = [];
+      
+      // Get set of cart item IDs that are assigned to combos
+      const assignedCartItemIds = new Set();
+      selectedCombos.forEach(combo => {
+        if (combo.slots) {
+          combo.slots.forEach(slot => {
+            if (slot.assigned && slot.assigned.cartItemId) {
+              assignedCartItemIds.add(slot.assigned.cartItemId);
+            }
+          });
+        }
+      });
+      
+      // Add single products (considering cart item assignments)
+      cart.forEach(item => {
+        // If this cart item is assigned to a combo, reduce quantity by 1
+        const quantityForSingles = assignedCartItemIds.has(item.cartItemId) 
+          ? Math.max(0, item.quantity - 1)  // Reduce by 1 for combo assignment
+          : item.quantity; // All quantity counts as singles
+        
+        if (quantityForSingles > 0) {
+          finalItems.push({
+            ...item,
+            quantity: quantityForSingles,
+            isComboApplied: false
+          });
+        }
+      });
+      
+      // Add combo products with adjusted pricing
+      selectedCombos.forEach(combo => {
+        const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+        if (allSlotsFilled) {
+          combo.slots.forEach(slot => {
+            if (slot.assigned) {
+              // Use the calculateAdjustedPrice function with the formula:
+              // Adjusted Price = (Product MRP / Total MRP) × Combo Price
+              const adjustedPrice = calculateAdjustedPrice(combo, slot);
+              const originalPrice = Number(slot.assigned.product.pricing?.offerPrice || 0);
+              
+              finalItems.push({
+                ...slot.assigned.product,
+                quantity: slot.assigned.qty,
+                price: adjustedPrice,
+                originalPrice: originalPrice,
+                isComboApplied: true,
+                appliedComboName: combo.name,
+                comboPrice: adjustedPrice,
+                comboSavings: Math.max(0, originalPrice - adjustedPrice)
+              });
+            }
+          });
+        }
+      });
+
+      const paymentData = {
+        cartItems: finalItems,
+        paymentMethod: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? 'mix' : 
+                      paymentAmounts.cash > 0 ? 'cash' : 'upi',
+        amount: totalAmount,
+        receivedAmount: paidAmount,
+        mixPaymentDetails: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? {
+          cash: Number(paymentAmounts.cash),
+          upi: Number(paymentAmounts.upi)
+        } : null,
+        customerInfo: {
+          name: name,
+          phone: mobile
+        },
+        // Don't send combo discount info since finalItems already have correct prices
+        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned)).map(combo => ({
+          comboId: combo._id,
+          comboName: combo.name,
+          offerPrice: combo.offerPrice,
+          discount: 0 // Set to 0 because finalItems already have adjusted prices
+        })),
+        // Add flag to tell backend not to apply additional combo logic
+        combosAlreadyApplied: true,
+        totalSavings: calculateTotalSavings()
+      };
+
+      let result = null;
+      let paymentProcessed = false;
+      
+      try {
+        result = await paymentService.processPayment(paymentData);
+        paymentProcessed = !!(result && (result.success || result.billNumber));
+      } catch (error) {
+        console.error('Payment service error:', error);
+        // Continue with offline bill generation
+        paymentProcessed = false;
+      }
+      
+      // Separate items for better bill display
+      const singlesItems = finalItems.filter(item => !item.isComboApplied);
+      const comboItems = finalItems.filter(item => item.isComboApplied);
+      
+
+
+      // Generate bill regardless of payment service response
+      const billData = {
+        billNumber: (result?.billNumber) || `B${Date.now()}`,
+        transactionId: result?.transactionId || `T${Date.now()}`,
+        date: new Date(),
+        customer: customerInfo,
+        items: finalItems, // This includes both singles and combo items with correct prices
+        singlesItems: singlesItems, // Only single items
+        comboItems: comboItems, // Only combo items with adjusted prices
+        subtotal: calculateSinglesSubtotal(),
+        combosTotal: calculateCombosSubtotal(),
+        total: totalAmount,
+        discount: calculateTotalSavings(),
+        paymentMethod: paymentData.paymentMethod,
+        receivedAmount: paidAmount,
+        change: Math.max(0, paidAmount - totalAmount),
+        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
+      };
+      
+      if (paymentProcessed) {
+        toast.success('Payment processed and saved successfully!');
+      } else {
+        toast.success('Bill generated successfully! (Offline mode)');
+      }
+      
+      // Set bill data for receipt
+      setLastBill(billData);
+      
+      // Ask user if they want to print
+      const printChoice = window.confirm('✅ Payment completed successfully!\n\n🖨 Click OK to PRINT the bill\n📄 Click Cancel to just save (no print)');
+      
+      if (printChoice) {
+        // Print receipt with current bill data and auto-print
+        printReceiptWithAutoPrint(billData);
+        toast.success('Bill saved and sent to printer!');
+      } else {
+        toast.success('Bill saved successfully! (No print)');
+      }
+      
+      // Clear bill after a short delay
+      setTimeout(() => {
+        clearBill();
+        setLastBill(null);
+      }, 1000);
+    } catch (error) {
+      console.error('Payment error:', error);
+      toast.error('Payment processing failed. Please try again.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Print receipt with provided data
+  const printReceiptWithData = (billData) => {
+    if (!billData) return;
+    
+    const receiptHTML = generateReceiptHTML(billData);
+    
+    const printWindow = window.open('', '_blank', 'width=800,height=700');
+    if (!printWindow) {
+      toast.error('Unable to open print window. Popup blocked?');
+      return;
+    }
+    
+    printWindow.document.write(receiptHTML);
+    printWindow.document.close();
+    printWindow.focus();
+  };
+
+  // Print receipt with auto-print command
+  const printReceiptWithAutoPrint = (billData) => {
+    if (!billData) return;
+    
+    const receiptHTML = generateReceiptHTML(billData, true); // Pass true for auto-print
+    
+    const printWindow = window.open('', '_blank', 'width=800,height=700');
+    if (!printWindow) {
+      toast.error('❌ Unable to open print window. Please check if popups are blocked.');
+      return;
+    }
+    
+    printWindow.document.write(receiptHTML);
+    printWindow.document.close();
+    
+    // Show print status
+    const loadingToast = toast.loading('🖨 Preparing to print...');
+    
+    // Automatically trigger print dialog
+    printWindow.onload = () => {
+      setTimeout(() => {
+        toast.dismiss(loadingToast);
+        printWindow.print();
+        toast.success('🖨 Print dialog opened! Check your printer.');
+      }, 500);
+    };
+    
+    printWindow.focus();
+    
+    // Dismiss loading toast after timeout as fallback
+    setTimeout(() => {
+      toast.dismiss(loadingToast);
+    }, 3000);
+  };
+
+  // Generate receipt HTML
+  const generateReceiptHTML = (bill, autoPrint = false) => {
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Receipt - ${lastBill.billNumber}</title>
+          <style>
+            /* Thermal Printer 3-inch (80mm) Paper */
+            @page {
+              size: 80mm auto;
+              margin: 2mm;
+            }
+            body { 
+              font-family: 'Courier New', monospace; 
+              font-size: 10px; 
+              line-height: 1.3;
+              margin: 0;
+              padding: 2mm;
+              width: 76mm; /* 3 inch - margins */
+              color: #000;
+            }
+            .center { text-align: center; }
+            .left { text-align: left; }
+            .right { text-align: right; }
+            .bold { font-weight: bold; }
+            .large { font-size: 12px; }
+            .small { font-size: 8px; }
+            .divider { 
+              border-top: 1px dashed #000; 
+              margin: 3mm 0; 
+              width: 100%;
+            }
+            .flex-between { 
+              display: flex; 
+              justify-content: space-between;
+              width: 100%;
+            }
+            .item-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 1px;
+            }
+            .item-name {
+              flex: 1;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              max-width: 45mm;
+            }
+            .item-qty, .item-price {
+              text-align: right;
+              min-width: 15mm;
+            }
+            .table-header {
+              display: flex;
+              justify-content: space-between;
+              border-bottom: 1px solid #000;
+              padding-bottom: 1px;
+              margin-bottom: 2px;
+              font-weight: bold;
+            }
+            .table-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 8px;
+              margin-bottom: 1px;
+            }
+            .col-sl { width: 8mm; }
+            .col-item { width: 32mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+            .col-qty { width: 12mm; text-align: right; }
+            .col-rate { width: 12mm; text-align: right; }
+            .col-total { width: 12mm; text-align: right; font-weight: bold; }
+            @media print {
+              body { 
+                margin: 0;
+                padding: 2mm;
+                width: 76mm;
+              }
+              .no-print { display: none; }
+              * { 
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="center">
+            <div class="bold large">VEEDRA THE BRAND</div>
+            <div class="small">Wholesalers in Western Wear,</div>
+            <div class="small">Ethnic Wear & Indo-Western Wear</div>
+            <div class="small">1st Parallel Road, Durgigudi,</div>
+            <div class="small">Shimoga – 577201</div>
+            <div class="small">📞 Mobile: 70262 09627</div>
+            <div class="small">GSTIN: __________</div>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="center bold">INVOICE</div>
+          
+          <div class="divider"></div>
+          
+          <div>
+            <div class="flex-between">
+              <span>Invoice: ${bill.billNumber}</span>
+            </div>
+            <div class="flex-between">
+              <span>Date: ${new Date(bill.date).toLocaleDateString()}</span>
+              <span>Time: ${new Date(bill.date).toLocaleTimeString()}</span>
+            </div>
+          </div>
+          
+          ${(bill.customer.name || bill.customer.phone) ? `
+          <div>
+            <strong>Customer:</strong> ${bill.customer.name || 'N/A'}<br>
+            <strong>Mobile:</strong> ${bill.customer.phone || 'N/A'}
+          </div>
+          <div class="divider"></div>
+          ` : ''}
+          
+          ${bill.combos && bill.combos.length > 0 ? `
+          <div style="font-size: 8px; margin-bottom: 2mm;">
+            <div style="font-weight: bold;">COMBO OFFERS APPLIED:</div>
+            ${(bill.combos || []).map(combo => `
+              <div style="margin: 1mm 0; padding: 1mm; border: 1px dashed #666;">
+                <div style="font-weight: bold;">${combo.name}</div>
+                <div style="font-size: 7px; color: #666;">Items priced proportionally at ₹${combo.offerPrice} total</div>
+              </div>
+            `).join('')}
+          </div>
+          ` : ''}
+
+          <div class="divider"></div>
+          
+          <!-- Items Table Header -->
+          <div style="font-size: 8px; font-weight: bold; margin-bottom: 2px;">
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #000; padding-bottom: 1px;">
+              <span style="width: 8mm;">SL</span>
+              <span style="width: 25mm; text-align: left;">NAME</span>
+              <span style="width: 12mm; text-align: right;">MRP</span>
+              <span style="width: 12mm; text-align: right;">OFFER RATE</span>
+              <span style="width: 8mm; text-align: right;">QTY</span>
+              <span style="width: 12mm; text-align: right;">TOTAL</span>
+            </div>
+          </div>
+          
+          <!-- Single Items -->
+          ${bill.singlesItems && bill.singlesItems.length > 0 ? 
+            (bill.singlesItems || []).map((item, index) => `
+            <div style="font-size: 8px; margin-bottom: 1px;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="width: 8mm;">${index + 1}</span>
+                <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
+                <span style="width: 12mm; text-align: right;">${fmt(item.originalPrice || item.pricing?.mrp || item.price)}</span>
+                <span style="width: 12mm; text-align: right;">${fmt(item.price)}</span>
+                <span style="width: 8mm; text-align: right;">${item.quantity}</span>
+                <span style="width: 12mm; text-align: right; font-weight: bold;">${fmt(item.price * item.quantity)}</span>
+              </div>
+            </div>
+          `).join('') : ''}
+
+          <!-- Combo Items -->
+          ${bill.comboItems && bill.comboItems.length > 0 ? 
+            (bill.comboItems || []).map((item, index) => {
+              const slNo = (bill.singlesItems?.length || 0) + index + 1;
+              return `
+            <div style="font-size: 8px; margin-bottom: 1px;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="width: 8mm;">${slNo}</span>
+                <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
+                <span style="width: 12mm; text-align: right;">${fmt(item.originalPrice || item.pricing?.mrp || 0)}</span>
+                <span style="width: 12mm; text-align: right;">${fmt(item.price)}</span>
+                <span style="width: 8mm; text-align: right;">${item.quantity}</span>
+                <span style="width: 12mm; text-align: right; font-weight: bold;">${fmt(item.price * item.quantity)}</span>
+              </div>
+              <div style="font-size: 7px; color: #666; margin-left: 8mm;">★ ${item.appliedComboName}</div>
+            </div>
+          `;}).join('') : ''}
+          
+
+
+          <div class="divider"></div>
+          
+          <div style="text-align:right">
+            ${(() => {
+              // Calculate GST breakdown for the total bill
+              const allItems = [
+                ...(bill.singlesItems || []),
+                ...(bill.comboItems || [])
+              ];
+              const gstBreakdown = calculateGSTBreakdown(bill.total, allItems);
+              
+              return `
+                <div>Taxable Amount: ${fmt(gstBreakdown.baseAmount)}</div>
+                <div>SGST (${gstBreakdown.sgstRate}%): ${fmt(gstBreakdown.sgst)}</div>
+                <div>CGST (${gstBreakdown.cgstRate}%): ${fmt(gstBreakdown.cgst)}</div>
+                <div style="margin-top: 8px;" class="divider"></div>
+                <div class="bold" style="font-size:1.2em">GRAND TOTAL: ${fmt(bill.total)}</div>
+                ${bill.discount > 0 ? `<div style="color:green">You Saved: ${fmt(bill.discount)}</div>` : ''}
+              `;
+            })()}
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div>
+            <div>Payment: ${bill.paymentMethod.toUpperCase()}</div>
+            <div>Paid: ${fmt(bill.receivedAmount)}</div>
+            <div>Change: ${fmt(bill.change)}</div>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="center bold small">Terms & Conditions</div>
+          <div class="center small">
+            <div>No Exchange, No Return, No Guarantee.</div>
+            <div>Please verify items before leaving the store.</div>
+            <div>Working Hours: 8:00 AM – 9:00 PM</div>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="center">
+            <div class="bold">Thank You for Shopping at</div>
+            <div class="bold">VEEDRA THE BRAND</div>
+            <div class="small">Best Prices in Shimoga</div>
+            <div class="small">Wholesale & Retail Available!</div>
+          </div>
+          
+          ${autoPrint ? `
+          <div class="no-print center" style="margin-top: 20px;">
+            <div style="color: #28a745; font-weight: bold; margin-bottom: 10px;">
+              📄 Printing... Please check your printer
+            </div>
+            <button onclick="window.print();" 
+                    style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
+              🖨 Print Again
+            </button>
+            <button onclick="window.close();" 
+                    style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
+              ✕ Close
+            </button>
+          </div>
+          ` : `
+          <div class="no-print center" style="margin-top: 20px;">
+            <button onclick="window.print(); window.close();" 
+                    style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
+              🖨 Print Receipt
+            </button>
+            <button onclick="window.close();" 
+                    style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
+              ✕ Close
+            </button>
+          </div>
+          `}
+        </body>
+      </html>
+    `;
+  };
+
+  // Print receipt - matches reference formatting (legacy function for preview)
+  const printReceipt = () => {
+    if (!lastBill) return;
+    printReceiptWithData(lastBill);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b px-6 py-4">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Point of Sale System</h1>
-          <div className="flex items-center gap-6">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">
-                {cart.reduce((sum, item) => sum + item.quantity, 0)}
+    <div className="min-h-screen" style={{ backgroundColor: '#f7fafc', fontFamily: '"Segoe UI", Roboto, Arial, sans-serif' }}>
+      {/* Add camera scanning styles */}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          #scanner_ref canvas {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+          }
+          #scanner_ref video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+          }
+          .drawingBuffer {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+          }
+        `
+      }} />
+
+      {/* Main Container - Modern layout */}
+      <div className="flex gap-6 p-6 max-w-7xl mx-auto">
+        {/* Left Panel - Input Section */}
+        <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-100" style={{ flex: '0 0 400px' }}>
+          {/* Customer Section */}
+          <div className="mb-4 bg-gray-50 rounded-lg p-3">
+            <h3 className="font-bold text-gray-800 mb-3 flex items-center">
+              <span className="bg-teal-100 text-teal-800 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mr-2">👤</span>
+              Customer
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mobile</label>
+                <input
+                  type="tel"
+                  placeholder="10-digit mobile"
+                  maxLength="10"
+                  value={customerInfo.phone}
+                  onChange={(e) => setCustomerInfo(prev => ({ ...prev, phone: e.target.value }))}
+                  className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors"
+                />
               </div>
-              <div className="text-xs text-gray-500">Items</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">
-                ₹{calculateTotal().toLocaleString()}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  type="text"
+                  placeholder="Customer name"
+                  value={customerInfo.name}
+                  onChange={(e) => setCustomerInfo(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors"
+                />
               </div>
-              <div className="text-xs text-gray-500">Total</div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel - Products */}
-        <div className="flex-1 p-6 overflow-hidden">
-          <div className="h-full flex flex-col">
-            {/* Quick Scanner */}
-            <Card className="mb-4">
-              <CardContent className="p-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Barcode Scanner */}
-                  <div className="relative">
-                    <Barcode className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <input
-                      ref={barcodeInputRef}
-                      type="text"
-                      placeholder="Scan barcode or enter product code..."
-                      value={barcodeInput}
-                      onChange={(e) => setBarcodeInput(e.target.value)}
-                      onKeyPress={handleBarcodeInput}
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
-                      autoFocus
-                    />
-                    <div className="absolute right-3 top-3">
-                      <Scan className="h-4 w-4 text-green-500 animate-pulse" />
+          {/* Combo Selection Section */}
+          <div className="mb-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-3 border border-purple-100">
+            <h3 className="font-bold text-gray-800 mb-3 flex items-center">
+              <span className="bg-purple-100 text-purple-800 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mr-2">🎁</span>
+              Combo Offers
+            </h3>
+            <div className="space-y-3">
+              <select 
+                className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors bg-white"
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) {
+                    const combo = combos.find(c => c._id === e.target.value);
+                    if (combo) addComboToBill(combo);
+                    e.target.value = "";
+                  }
+                }}
+              >
+                <option value="">-- Select a combo --</option>
+                {combos.filter(combo => {
+                  const status = computeStatus({
+                    validFrom: combo.validFrom,
+                    validTo: combo.validTo,
+                    paused: combo.paused
+                  });
+                  return status === 'active' && !selectedCombos.find(c => c._id === combo._id);
+                }).map(combo => (
+                  <option key={combo._id} value={combo._id}>
+                    {combo.name} — {combo.sku} — {fmt(combo.offerPrice)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Instructions when combos are active */}
+            {selectedCombos.length > 0 && selectedCombos.some(combo => !combo.slots?.every(slot => slot.assigned)) && (
+              <div className="mt-3 p-3 bg-gradient-to-r from-blue-100 to-cyan-100 rounded-lg border border-blue-200">
+                <div className="flex items-center mb-2">
+                  <span className="text-blue-600 mr-2">💡</span>
+                  <span className="font-medium text-blue-800 text-sm">Auto-Assignment Active</span>
+                </div>
+                <p className="text-xs text-blue-700">
+                  Scan or search for products to automatically fill combo slots. Products will be assigned to the most recent combo first.
+                </p>
+              </div>
+            )}
+
+            {/* Selected Combos Display */}
+            <div className="mt-3 space-y-3">
+              {selectedCombos.map((combo, index) => {
+                const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+                const assignedCount = combo.slots?.filter(slot => slot.assigned).length || 0;
+                const totalSlots = combo.slots?.length || 0;
+                const progressPercent = totalSlots > 0 ? (assignedCount / totalSlots) * 100 : 0;
+                
+                return (
+                  <div key={index} className={`rounded-lg p-3 mb-3 border-2 transition-all duration-200 ${
+                    allSlotsFilled 
+                      ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-300' 
+                      : assignedCount > 0 
+                        ? 'bg-gradient-to-r from-yellow-50 to-amber-50 border-yellow-300'
+                        : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-300'
+                  }`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1">
+                        <div className="font-bold text-sm text-gray-800 flex items-center">
+                          <span className="mr-2">{allSlotsFilled ? '✅' : assignedCount > 0 ? '🔄' : '⏳'}</span>
+                          {combo.name}
+                        </div>
+                        <div className="text-xs text-gray-600">SKU: {combo.sku}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-green-700">{fmt(combo.offerPrice)}</div>
+                        <div className={`text-xs font-bold ${allSlotsFilled ? 'text-green-700' : assignedCount > 0 ? 'text-yellow-700' : 'text-blue-700'}`}>
+                          {allSlotsFilled ? '🎉 Complete!' : `${assignedCount}/${totalSlots} items`}
+                        </div>
+                        <button 
+                          onClick={() => removeComboInstance(combo)}
+                          className="mt-1 px-2 py-1 bg-red-500 text-white text-xs rounded-md hover:bg-red-600 transition-colors"
+                        >
+                          ✕ Remove
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Progress Bar */}
+                    <div className="mb-2">
+                      <div className="flex justify-between text-xs text-gray-600 mb-1">
+                        <span>Progress</span>
+                        <span>{Math.round(progressPercent)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className={`h-2 rounded-full transition-all duration-300 ${
+                            allSlotsFilled ? 'bg-green-500' : 'bg-blue-500'
+                          }`}
+                          style={{ width: `${progressPercent}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                    
+                    {/* Slots display */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
+                      {combo.slots?.map((slot, slotIndex) => {
+                        const priceRange = (slot.minPrice || slot.maxPrice) ? 
+                          `₹${fmt(slot.minPrice)}-${fmt(slot.maxPrice)}` : "Any Price";
+                        
+                        return (
+                          <div 
+                            key={slotIndex} 
+                            className={`p-2 rounded-lg border-2 transition-all duration-200 ${
+                              slot.assigned 
+                                ? 'bg-green-100 border-green-400 shadow-sm' 
+                                : 'bg-white border-dashed border-blue-300 hover:border-blue-400'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-bold text-xs text-gray-700">Slot {slotIndex + 1}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                slot.assigned ? 'bg-green-200 text-green-800' : 'bg-blue-100 text-blue-700'
+                              }`}>
+                                {slot.assigned ? '✓' : '○'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-600 mb-1">{priceRange}</div>
+                            {slot.assigned ? (
+                              <div className="text-xs">
+                                <div className="font-medium text-green-800">{slot.assigned.product.name}</div>
+                                <div className="text-green-600">
+                                  <div className="line-through text-gray-400">{fmt(slot.assigned.product.pricing?.offerPrice || 0)}</div>
+                                  <div className="font-bold text-green-700">{fmt(calculateAdjustedPrice(combo, slot))}</div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-500 italic">Scan product to fill</div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                  
-                  {/* Product Search */}
-                  <div className="relative">
-                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      placeholder="Search products by name..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      onKeyPress={handleProductSearch}
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
-                    />
-                  </div>
-                </div>
-                
-                {/* Category Filter */}
-                <div className="mt-3">
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value)}
-                    className="w-full md:w-auto px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">All Categories</option>
-                    {categories.map(category => (
-                      <option key={category._id} value={category._id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Products Grid */}
-            <Card className="flex-1 overflow-hidden">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2">
-                  <ShoppingCart className="h-5 w-5" />
-                  Products ({filteredProducts.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 h-full overflow-y-auto">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                  {filteredProducts.map(product => (
-                    <button
-                      key={product._id}
-                      onClick={() => addToCart(product)}
-                      className="p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-500 hover:shadow-md transition-all text-left"
-                    >
-                      <h4 className="font-medium text-sm text-gray-900 truncate">{product.name || 'Unknown Product'}</h4>
-                      <p className="text-xs text-gray-600 truncate">{product.productCode || 'N/A'}</p>
-                      <div className="flex flex-col">
-                        <p className="text-lg font-bold text-green-600">₹{(product.pricing?.offerPrice || 0).toLocaleString()}</p>
-                        {product.pricing?.discountedPrice && product.pricing.discountedPrice !== product.pricing.offerPrice && (
-                          <p className="text-xs text-blue-600">Combo: ₹{(product.pricing.discountedPrice || 0).toLocaleString()}</p>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500">Stock: {product.inventory?.currentStock || 0}</p>
-                    </button>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                );
+              })}
+            </div>
           </div>
-        </div>
 
-        {/* Right Panel - Cart & Checkout */}
-        <div className="w-96 bg-white border-l border-gray-200 flex flex-col">
-          {/* Customer Info */}
-          <div className="p-4 border-b border-gray-200">
-            <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-              <User className="h-4 w-4" />
-              Customer Information
+          {/* Product Scanner Section */}
+          <div className="mb-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 border border-blue-100">
+            <h3 className="font-bold text-gray-800 mb-3 flex items-center">
+              <span className="bg-blue-100 text-blue-800 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mr-2">📱</span>
+              Scan Product
+            </h3>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  onKeyDown={handleBarcodeInput}
+                  className="flex-1 p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors bg-white"
+                  placeholder="Enter or scan barcode / SKU"
+                  autoFocus
+                />
+                <input
+                  type="number"
+                  min="1"
+                  value={qtyInput}
+                  onChange={(e) => setQtyInput(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-20 p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors bg-white"
+                />
+                <button 
+                  onClick={() => {
+                    if (barcodeInput.trim()) {
+                      handleBarcodeInput({ key: 'Enter', preventDefault: () => {} });
+                    }
+                  }}
+                  className="px-4 py-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                >
+                  Add
+                </button>
+              </div>
+              
+              <div className="flex gap-3 items-center bg-white p-2 rounded-lg border border-gray-200">
+                <div 
+                  ref={scannerRef}
+                  id="scanner_ref"
+                  className="rounded-lg overflow-hidden relative bg-gray-900 flex items-center justify-center text-white text-xs shadow-inner" 
+                  style={{ width: '120px', height: '90px' }}
+                >
+                  {!isScanning && (
+                    <div className="text-center z-20 relative">
+                      <div className="text-lg mb-1">📷</div>
+                      <small>Camera</small>
+                    </div>
+                  )}
+                  {isScanning && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30 text-white text-xs z-10 pointer-events-none">
+                      <div className="text-center">
+                        <div className="animate-pulse text-green-400 text-lg">🔍</div>
+                        <small className="text-green-400">Scanning...</small>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 space-y-2">
+                  {!isScanning ? (
+                    <>
+                      <button 
+                        onClick={startCameraScanning}
+                        disabled={!!cameraError}
+                        className="w-full px-3 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                      >
+                        📷 Start Camera
+                      </button>
+                      {cameraError && cameraError.includes('denied') && (
+                        <button 
+                          onClick={requestCameraPermission}
+                          className="w-full px-3 py-2 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700"
+                        >
+                          🔐 Grant Access
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <button 
+                      onClick={stopCameraScanning}
+                      className="w-full px-3 py-2 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700 font-medium"
+                    >
+                      ⏹ Stop Camera
+                    </button>
+                  )}
+                  {cameraError && (
+                    <div className="text-xs text-red-600">{cameraError}</div>
+                  )}
+                  {isScanning && (
+                    <div className="text-xs text-green-600 font-medium">
+                      📷 Camera Active
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Single Products Section */}
+          <div className="mb-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 border border-green-100">
+            <h3 className="font-bold text-gray-800 mb-3 flex items-center">
+              <span className="bg-green-100 text-green-800 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mr-2">🛍</span>
+              Single Products
             </h3>
             <div className="space-y-2">
-              <input
-                type="text"
-                placeholder="Customer name (optional)"
-                value={customerInfo.name}
-                onChange={(e) => setCustomerInfo(prev => ({ ...prev, name: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <input
-                type="tel"
-                placeholder="Phone number (optional)"
-                value={customerInfo.phone}
-                onChange={(e) => setCustomerInfo(prev => ({ ...prev, phone: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Cart Items */}
-          <div className="flex-1 overflow-y-auto p-4">
-            <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-              <ShoppingCart className="h-4 w-4" />
-              Cart Items ({cart.length})
-            </h3>
-            
-            {cart.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <ShoppingCart className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                <p>Cart is empty</p>
-                <p className="text-sm">Scan or search products to add</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {cart.map(item => (
-                  <div key={item._id} className="bg-gray-50 rounded-lg p-3">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h4 className="font-medium text-sm text-gray-900">{item.name}</h4>
-                        {selectedCombo && (item.itemsInCombo > 0 || item.itemsAtOfferPrice > 0) && (
-                          <div className="text-xs text-gray-600">
-                            {item.itemsInCombo > 0 && (
-                              <span className="text-green-600">{item.itemsInCombo} in combo</span>
-                            )}
-                            {item.itemsInCombo > 0 && item.itemsAtOfferPrice > 0 && <span>, </span>}
-                            {item.itemsAtOfferPrice > 0 && (
-                              <span className="text-orange-600">{item.itemsAtOfferPrice} at offer price</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => removeFromCart(item._id)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => updateQuantity(item._id, item.quantity - 1)}
-                          className="w-8 h-8 rounded bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
-                        >
-                          <Minus className="h-3 w-3" />
-                        </button>
-                        <span className="w-8 text-center font-medium">{item.quantity}</span>
-                        <button
-                          onClick={() => updateQuantity(item._id, item.quantity + 1)}
-                          className="w-8 h-8 rounded bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </button>
-                      </div>
-                      
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-green-600">₹{(item.price || 0).toLocaleString()} each</p>
-                        
-                        {/* Show pricing context based on combo status */}
-                        {selectedCombo && item.isComboApplied ? (
-                          <>
-                            {item.offerPrice && item.offerPrice !== item.price && (
-                              <p className="text-xs text-gray-500 line-through">Offer: ₹{item.offerPrice.toLocaleString()}</p>
-                            )}
-                            <p className="text-xs text-blue-600">Combo: Discounted Price</p>
-                          </>
-                        ) : (
-                          <>
-                            {item.discountedPrice && item.discountedPrice !== item.price && (
-                              <p className="text-xs text-gray-400">Available: ₹{item.discountedPrice.toLocaleString()}</p>
-                            )}
-                            <p className="text-xs text-orange-600">No Combo: Offer Price</p>
-                          </>
-                        )}
-                        
-                        <p className="font-semibold text-green-600">₹{((item.price || 0) * item.quantity).toLocaleString()}</p>
-                      </div>
-                    </div>
+              {cart.map((item, index) => (
+                <div key={index} className="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-lg text-sm shadow-sm">
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{item.name}</div>
+                    <small className="text-gray-500">({item.productCode || item.code})</small>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Cart Summary */}
-          <div className="border-t border-gray-200 p-4">
-            {/* Available Combos */}
-            {cart.length > 0 && (
-              <div className="mb-4">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Available Combos</h4>
-                <p className="text-xs text-blue-600 mb-2">* Combos applied on discounted prices</p>
-                <div className="space-y-2 max-h-32 overflow-y-auto">
-                  {(() => {
-                    const activeCombos = combos.filter(combo => !combo.paused);
-                    if (activeCombos.length === 0) {
-                      return (
-                        <div className="text-sm text-gray-500 p-2 border border-gray-200 rounded">
-                          No active combos available
-                        </div>
-                      );
-                    }
-                    
-                    return activeCombos.slice(0, 3).map((combo) => {
-                      // Check if combo is currently valid
-                      const now = new Date();
-                      const isActive = (!combo.validFrom || new Date(combo.validFrom) <= now) &&
-                                      (!combo.validTo || new Date(combo.validTo) >= now);
-                      
-                      if (!isActive) return null;
-                      
-                      // Check if cart meets minimum quantity
-                      const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-                      const requiredQty = combo.qtyProducts || 1;
-                      
-                      if (totalCartQty < requiredQty) return null;
-                      
-                      // Check if cart total (DISCOUNTED PRICES) is within combo price slots
-                      const discountedCartTotal = cart.reduce((sum, item) => {
-                        const itemDiscountedPrice = item.discountedPrice || item.offerPrice || 0;
-                        return sum + (itemDiscountedPrice * item.quantity);
-                      }, 0);
-                      const slots = combo.rules?.slots || [];
-                      
-                      let isEligible = true;
-                      if (slots.length > 0) {
-                        isEligible = slots.some(slot => 
-                          discountedCartTotal >= slot.minPrice && discountedCartTotal <= slot.maxPrice
-                        );
-                      }
-                      
-                      if (!isEligible) return null;
-                      
-                      const estimatedSavings = calculateComboSavings(combo);
-                      
-                      return (
-                        <div
-                          key={combo._id}
-                          className={`p-2 border rounded cursor-pointer transition-colors text-xs ${
-                            selectedCombo?._id === combo._id
-                              ? 'border-green-500 bg-green-50'
-                              : 'border-gray-300 hover:border-blue-500'
-                          }`}
-                          onClick={() => applyCombo(combo)}
-                        >
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="font-medium text-gray-900">{combo.name}</p>
-                              <p className="text-gray-600">
-                                {combo.qtyProducts} items for ₹{combo.offerPrice}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-semibold text-green-600">₹{estimatedSavings.toFixed(0)}</p>
-                              <button className="text-xs bg-blue-600 text-white px-2 py-1 rounded">
-                                Apply
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }).filter(Boolean);
-                  })()}
-                </div>
-              </div>
-            )}
-            
-            {/* Applied Combo Display */}
-            {selectedCombo && (
-              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm font-medium text-green-800">{selectedCombo.name}</p>
-                    <p className="text-xs text-green-600">
-                      {selectedCombo.qtyProducts} items for ₹{selectedCombo.offerPrice}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-green-600 font-medium text-sm">
-                      -₹{calculateComboDiscount().toLocaleString()}
-                    </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium">{fmt(item.price)} × {item.quantity}</span>
                     <button 
-                      onClick={removeCombo}
-                      className="text-red-500 hover:text-red-700 text-xs p-1"
-                      title="Remove combo"
+                      onClick={() => removeFromCart(item._id)}
+                      className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded-md hover:bg-red-200 transition-colors"
                     >
                       ✕
                     </button>
                   </div>
                 </div>
-              </div>
-            )}
-            
-            <div className="space-y-2 mb-4">
-              {selectedCombo ? (
-                <>
-                  <div className="bg-green-50 p-2 rounded text-sm">
-                    <div className="font-medium text-green-800">Combo Applied: {selectedCombo.name}</div>
-                    <div className="text-xs text-green-600">
-                      {(() => {
-                        const requiredQty = selectedCombo.qtyProducts || 1;
-                        const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-                        const comboSets = Math.floor(totalCartQty / requiredQty);
-                        const remainingItems = totalCartQty % requiredQty;
-                        return (
-                          <>
-                            {comboSets} combo set(s) of {requiredQty} items each
-                            {remainingItems > 0 && `, ${remainingItems} items at offer price`}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                  
-                  {(() => {
-                    const requiredQty = selectedCombo.qtyProducts || 1;
-                    const totalCartQty = cart.reduce((sum, item) => sum + item.quantity, 0);
-                    const comboSets = Math.floor(totalCartQty / requiredQty);
-                    const remainingItems = totalCartQty % requiredQty;
-                    
-                    // Calculate remaining items price
-                    let remainingPrice = 0;
-                    let itemsProcessed = 0;
-                    
-                    for (const item of cart) {
-                      const itemsInCombo = Math.min(item.quantity, requiredQty * comboSets - itemsProcessed);
-                      const itemsAtOfferPrice = item.quantity - itemsInCombo;
-                      
-                      if (itemsAtOfferPrice > 0) {
-                        remainingPrice += (item.offerPrice || 0) * itemsAtOfferPrice;
-                      }
-                      
-                      itemsProcessed += itemsInCombo;
-                      if (itemsProcessed >= requiredQty * comboSets) break;
-                    }
-                    
-                    return (
-                      <>
-                        {comboSets > 0 && (
-                          <div className="flex justify-between text-sm">
-                            <span>Combo ({comboSets} × {requiredQty} items):</span>
-                            <span>₹{(selectedCombo.offerPrice * comboSets).toLocaleString()}</span>
-                          </div>
-                        )}
-                        {remainingItems > 0 && (
-                          <div className="flex justify-between text-sm">
-                            <span>Remaining items ({remainingItems}):</span>
-                            <span>₹{remainingPrice.toLocaleString()}</span>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                  
-                  <div className="flex justify-between text-sm">
-                    <span>Tax (GST):</span>
-                    <span>₹{calculateTax().toLocaleString()}</span>
-                  </div>
-                  <div className="border-t border-gray-200 pt-2 mt-2">
-                    <div className="flex justify-between text-lg font-bold">
-                      <span>Total:</span>
-                      <span className="text-green-600">₹{calculateTotal().toLocaleString()}</span>
-                    </div>
-                    <div className="text-xs text-green-600 text-right">
-                      You saved ₹{calculateComboSavings(selectedCombo).toLocaleString()}!
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="bg-orange-50 p-2 rounded text-sm">
-                    <div className="font-medium text-orange-800">No Combo Applied</div>
-                    <div className="text-xs text-orange-600">All items at offer prices</div>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Subtotal:</span>
-                    <span>₹{calculateSubtotal().toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Tax (GST):</span>
-                    <span>₹{calculateTax().toLocaleString()}</span>
-                  </div>
-                  <div className="border-t border-gray-200 pt-2 mt-2">
-                    <div className="flex justify-between text-lg font-bold">
-                      <span>Total:</span>
-                      <span className="text-green-600">₹{calculateTotal().toLocaleString()}</span>
-                    </div>
-                  </div>
-                </>
+              ))}
+              {cart.length === 0 && (
+                <div className="text-gray-500 text-sm text-center py-4 bg-white rounded-lg border-2 border-dashed border-gray-300">
+                  No single products added
+                </div>
               )}
             </div>
-            
-            <button
-              onClick={proceedToPayment}
-              disabled={cart.length === 0}
-              className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-lg font-semibold"
+          </div>
+
+          <div className="mt-6">
+            <button 
+              onClick={clearBill}
+              className="w-full px-4 py-3 text-sm bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-lg hover:from-gray-700 hover:to-gray-800 transition-all duration-200 font-medium shadow-md"
             >
-              <CreditCard className="h-5 w-5" />
-              Proceed to Payment (₹{calculateTotal().toLocaleString()})
+              🗑 Clear Bill
             </button>
+          </div>
+        </div>
+
+        {/* Right Panel - Bill Summary */}
+        <div className="flex-1 bg-white rounded-xl shadow-lg p-4 border border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-gray-800 text-xl">Bill Summary</h3>
+            <div className="bg-teal-100 text-teal-800 px-3 py-1 rounded-full text-sm font-medium">
+              {(cart.length + selectedCombos.length)} items
+            </div>
+          </div>
+          
+          <div>
+            {/* Combos Summary */}
+            <div className="mb-3">
+              <h4 className="font-medium text-gray-700 mb-2">Combos</h4>
+              {selectedCombos.length > 0 ? (
+                <div className="space-y-2">
+                  {selectedCombos.map((combo, index) => {
+                    const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+                    const assignedCount = combo.slots?.filter(slot => slot.assigned).length || 0;
+                    const saving = allSlotsFilled ? (() => {
+                      const sumMRP = combo.slots.reduce((sum, slot) => {
+                        return slot.assigned ? sum + Number(slot.assigned.product.pricing?.offerPrice || 0) : sum;
+                      }, 0);
+                      return Math.max(0, sumMRP - Number(combo.offerPrice || 0));
+                    })() : 0;
+                    
+                    return (
+                      <div key={`${combo._id}-${index}`} className="text-sm p-2 border-b border-dashed border-gray-300 mb-2">
+                        <div className="flex justify-between items-center">
+                          <strong>{combo.name}</strong>
+                          <span>{fmt(combo.offerPrice)}</span>
+                        </div>
+                        <div className="text-xs text-green-600 mt-1">
+                          Slots: {assignedCount}/{combo.slots?.length || 0} {allSlotsFilled && <span className="text-green-700">(Ready)</span>}
+                        </div>
+                        {saving > 0 && (
+                          <div className="text-xs text-green-700 mt-1">
+                            Saving: {fmt(saving)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">No combos added</div>
+              )}
+            </div>
+
+            {/* Singles Table */}
+            <h4 className="font-medium text-gray-700 mb-2">Singles</h4>
+            <table className="w-full border-collapse border border-gray-300 text-sm mb-3">
+              <thead>
+                <tr>
+                  <th className="border border-gray-300 p-1 text-left text-xs">Item</th>
+                  <th className="border border-gray-300 p-1 text-left text-xs">MRP</th>
+                  <th className="border border-gray-300 p-1 text-left text-xs">Qty</th>
+                  <th className="border border-gray-300 p-1 text-right text-xs">Total</th>
+                  <th className="border border-gray-300 p-1"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {cart.map((item, index) => (
+                  <tr key={index}>
+                    <td className="border border-gray-300 p-1 text-xs">{item.name}</td>
+                    <td className="border border-gray-300 p-1 text-xs">{fmt(item.price)}</td>
+                    <td className="border border-gray-300 p-1">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => updateQuantity(item._id, item.quantity - 1)}
+                          className="w-5 h-5 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"
+                        >
+                          <Minus className="h-2 w-2" />
+                        </button>
+                        <span className="w-6 text-center text-xs">{item.quantity}</span>
+                        <button
+                          onClick={() => updateQuantity(item._id, item.quantity + 1)}
+                          className="w-5 h-5 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"
+                        >
+                          <Plus className="h-2 w-2" />
+                        </button>
+                      </div>
+                    </td>
+                    <td className="border border-gray-300 p-1 text-right text-xs">
+                      {fmt(item.price * item.quantity)}
+                    </td>
+                    <td className="border border-gray-300 p-1">
+                      <button 
+                        onClick={() => removeFromCart(item._id)}
+                        className="px-2 py-1 bg-teal-600 text-white text-xs rounded hover:bg-teal-700"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {cart.length === 0 && (
+                  <tr>
+                    <td colSpan="5" className="border border-gray-300 p-4 text-center text-gray-500 text-xs">
+                      No items in cart
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {/* Combo Items Table */}
+            {(() => {
+              const comboItems = [];
+              selectedCombos.forEach(combo => {
+                const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+                if (allSlotsFilled) {
+                  combo.slots.forEach(slot => {
+                    if (slot.assigned) {
+                      const adjustedPrice = calculateAdjustedPrice(combo, slot);
+                      const originalPrice = Number(slot.assigned.product.pricing?.offerPrice || 0);
+                      comboItems.push({
+                        ...slot.assigned.product,
+                        quantity: slot.assigned.qty,
+                        adjustedPrice: adjustedPrice,
+                        originalPrice: originalPrice,
+                        comboName: combo.name
+                      });
+                    }
+                  });
+                }
+              });
+
+              if (comboItems.length > 0) {
+                return (
+                  <div className="mt-4">
+                    <h4 className="font-medium text-gray-700 mb-2">Combo Items (Adjusted Pricing)</h4>
+                    <table className="w-full text-xs border border-gray-300">
+                      <thead className="bg-orange-50">
+                        <tr>
+                          <th className="border border-gray-300 p-1 text-left text-xs">Item</th>
+                          <th className="border border-gray-300 p-1 text-left text-xs">Original</th>
+                          <th className="border border-gray-300 p-1 text-left text-xs">Adjusted</th>
+                          <th className="border border-gray-300 p-1 text-left text-xs">Qty</th>
+                          <th className="border border-gray-300 p-1 text-right text-xs">Total</th>
+                          <th className="border border-gray-300 p-1 text-xs">Combo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {comboItems.map((item, index) => (
+                          <tr key={index}>
+                            <td className="border border-gray-300 p-1 text-xs">{item.name}</td>
+                            <td className="border border-gray-300 p-1 text-xs text-gray-500 line-through">{fmt(item.originalPrice)}</td>
+                            <td className="border border-gray-300 p-1 text-xs font-bold text-orange-700">{fmt(item.adjustedPrice)}</td>
+                            <td className="border border-gray-300 p-1 text-xs text-center">{item.quantity}</td>
+                            <td className="border border-gray-300 p-1 text-right text-xs font-bold">
+                              {fmt(item.adjustedPrice * item.quantity)}
+                            </td>
+                            <td className="border border-gray-300 p-1 text-xs text-blue-600">
+                              {item.comboName}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {/* Totals Section */}
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-4 mb-4 border border-blue-100">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Singles Subtotal:</span>
+                  <span className="font-medium">{fmt(calculateSinglesSubtotal())}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Combos Total:</span>
+                  <span className="font-medium">{fmt(calculateCombosSubtotal())}</span>
+                </div>
+                
+                {/* GST Breakdown */}
+                {(() => {
+                  const grandTotal = calculateGrandTotal();
+                  if (grandTotal > 0) {
+                    const allItems = [
+                      ...cart.map(item => ({ price: item.price, quantity: item.quantity })),
+                      ...selectedCombos.flatMap(combo => 
+                        (combo.items || []).map(item => ({ price: item.offerPrice || item.price, quantity: item.quantity }))
+                      )
+                    ];
+                    const gstBreakdown = calculateGSTBreakdown(grandTotal, allItems);
+                    
+                    return (
+                      <div className="border-t border-gray-200 pt-2 mt-3 space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Taxable Amount:</span>
+                          <span className="font-medium">{fmt(gstBreakdown.baseAmount)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">SGST ({gstBreakdown.sgstRate}%):</span>
+                          <span className="font-medium">{fmt(gstBreakdown.sgst)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">CGST ({gstBreakdown.cgstRate}%):</span>
+                          <span className="font-medium">{fmt(gstBreakdown.cgst)}</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+                
+                <div className="border-t border-blue-200 pt-2 mt-3">
+                  <div className="flex justify-between text-xl font-bold">
+                    <span className="text-gray-800">GRAND TOTAL:</span>
+                    <span className="text-blue-700">{fmt(calculateGrandTotal())}</span>
+                  </div>
+                </div>
+                {calculateTotalSavings() > 0 && (
+                  <div className="flex justify-between text-sm bg-green-100 rounded-md p-2 mt-2">
+                    <span className="text-green-700 font-medium flex items-center">
+                      💰 You Saved:
+                    </span>
+                    <span className="text-green-800 font-bold">{fmt(calculateTotalSavings())}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <hr className="my-3" />
+
+            {/* Payment Section */}
+            <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg p-4 border border-purple-100">
+              <h4 className="font-bold text-gray-800 mb-4 flex items-center">
+                <span className="bg-purple-100 text-purple-800 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mr-2">💳</span>
+                Payment Methods
+              </h4>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <div className="text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      💵 Cash Amount
+                    </div>
+                    <input 
+                      type="number" 
+                      min="0" 
+                      value={paymentAmounts.cash || ''} 
+                      onChange={(e) => setPaymentAmounts(prev => ({ ...prev, cash: Number(e.target.value) || 0 }))}
+                      className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                      placeholder="0.00"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      📱 UPI Amount
+                    </div>
+                    <input 
+                      type="number" 
+                      min="0" 
+                      value={paymentAmounts.upi || ''} 
+                      onChange={(e) => setPaymentAmounts(prev => ({ ...prev, upi: Number(e.target.value) || 0 }))}
+                      className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                      placeholder="0.00"
+                    />
+                  </label>
+                </div>
+                
+                <div className="bg-white rounded-lg p-3 border border-gray-200">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-medium text-gray-600">Total Paid:</span>
+                    <span className="text-lg font-bold text-blue-700">₹{((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-600">
+                      {((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) >= calculateGrandTotal() ? 'Change:' : 'Due:'}
+                    </span>
+                    <span className={`text-lg font-bold ${((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) >= calculateGrandTotal() ? 'text-green-600' : 'text-red-600'}`}>
+                      ₹{Math.abs(((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) - calculateGrandTotal()).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 mt-4">
+                  <button
+                    onClick={finalizeAndPrint}
+                    disabled={processing || (cart.length === 0 && selectedCombos.length === 0)}
+                    className="flex-1 px-4 py-3 text-sm bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-md"
+                  >
+                    {processing ? '⏳ Processing...' : '✅ Finalize & Print'}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      // Create preview bill with combo items
+                      const previewItems = [];
+                      
+                      // Get set of cart item IDs that are assigned to combos
+                      const assignedCartItemIds = new Set();
+                      selectedCombos.forEach(combo => {
+                        if (combo.slots) {
+                          combo.slots.forEach(slot => {
+                            if (slot.assigned && slot.assigned.cartItemId) {
+                              assignedCartItemIds.add(slot.assigned.cartItemId);
+                            }
+                          });
+                        }
+                      });
+                      
+                      // Add single products (considering cart item assignments)
+                      cart.forEach(item => {
+                        // If this cart item is assigned to a combo, reduce quantity by 1
+                        const quantityForSingles = assignedCartItemIds.has(item.cartItemId) 
+                          ? Math.max(0, item.quantity - 1)  // Reduce by 1 for combo assignment
+                          : item.quantity; // All quantity counts as singles
+                        
+                        if (quantityForSingles > 0) {
+                          previewItems.push({
+                            ...item,
+                            quantity: quantityForSingles,
+                            isComboApplied: false
+                          });
+                        }
+                      });
+                      
+                      // Add combo products
+                      selectedCombos.forEach(combo => {
+                        const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+                        if (allSlotsFilled) {
+                          combo.slots.forEach(slot => {
+                            if (slot.assigned) {
+                              // Use the calculateAdjustedPrice function for consistency
+                              const adjustedPrice = calculateAdjustedPrice(combo, slot);
+                              const originalPrice = Number(slot.assigned.product.pricing?.offerPrice || 0);
+                              
+                              previewItems.push({
+                                ...slot.assigned.product,
+                                quantity: slot.assigned.qty,
+                                price: adjustedPrice,
+                                originalPrice: originalPrice,
+                                isComboApplied: true,
+                                appliedComboName: combo.name,
+                                comboPrice: adjustedPrice
+                              });
+                            }
+                          });
+                        }
+                      });
+
+                      // Separate items for preview
+                      const previewSingles = previewItems.filter(item => !item.isComboApplied);
+                      const previewCombos = previewItems.filter(item => item.isComboApplied);
+
+                      const previewBill = {
+                        billNumber: 'PREVIEW',
+                        date: new Date(),
+                        customer: customerInfo,
+                        items: previewItems,
+                        singlesItems: previewSingles,
+                        comboItems: previewCombos,
+                        subtotal: calculateSinglesSubtotal(),
+                        combosTotal: calculateCombosSubtotal(),
+                        tax: 0,
+                        discount: calculateTotalSavings(),
+                        total: calculateGrandTotal(),
+                        paymentMethod: (paymentAmounts.cash > 0 && paymentAmounts.upi > 0) ? 'mix' : 
+                                     paymentAmounts.cash > 0 ? 'cash' : 'upi',
+                        receivedAmount: (paymentAmounts.cash || 0) + (paymentAmounts.upi || 0),
+                        change: Math.max(0, ((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) - calculateGrandTotal()),
+                        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
+                      };
+                      
+                      printReceiptWithData(previewBill);
+                    }}
+                    className="px-4 py-3 text-sm bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-lg hover:from-gray-700 hover:to-gray-800 transition-all duration-200 font-medium"
+                  >
+                    👁 Preview
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Payment Modal */}
-      {showPayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-md w-full">
-            <div className="p-6">
-              <h3 className="text-lg font-medium mb-4">Payment</h3>
-              
-              {/* Payment Method Selection */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => setPaymentMethod('cash')}
-                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${
-                      paymentMethod === 'cash' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                    }`}
-                  >
-                    <Banknote className="h-5 w-5" />
-                    <span className="text-xs">Cash</span>
-                  </button>
-                  <button
-                    onClick={() => setPaymentMethod('card')}
-                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${
-                      paymentMethod === 'card' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                    }`}
-                  >
-                    <CreditCard className="h-5 w-5" />
-                    <span className="text-xs">Card</span>
-                  </button>
-                  <button
-                    onClick={() => setPaymentMethod('upi')}
-                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${
-                      paymentMethod === 'upi' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                    }`}
-                  >
-                    <Smartphone className="h-5 w-5" />
-                    <span className="text-xs">UPI</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Amount Details */}
-              <div className="bg-gray-50 p-4 rounded-lg mb-4">
-                <div className="flex justify-between items-center text-lg font-semibold">
-                  <span>Total Amount:</span>
-                  <span>₹{calculateTotal().toLocaleString()}</span>
-                </div>
-              </div>
-
-              {/* Cash Payment Input */}
-              {paymentMethod === 'cash' && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Received Amount</label>
-                  <input
-                    type="number"
-                    placeholder="Enter received amount"
-                    value={receivedAmount}
-                    onChange={(e) => setReceivedAmount(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  {receivedAmount && (
-                    <div className="mt-2 text-sm">
-                      <span className="text-gray-600">Change: </span>
-                      <span className="font-semibold text-green-600">
-                        ₹{Math.max(0, parseFloat(receivedAmount) - calculateTotal()).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowPayment(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handlePayment}
-                  disabled={processing}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {processing ? 'Processing...' : 'Complete Payment'}
-                </button>
-              </div>
+      {/* Quick Product Search - Fixed Position */}
+      {searchTerm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-gray-200">
+              <h4 className="text-lg font-bold text-gray-800 flex items-center">
+                <span className="bg-blue-100 text-blue-800 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mr-3">🔍</span>
+                Search Results ({filteredProducts.length} found)
+              </h4>
+              <button 
+                onClick={() => setSearchTerm('')}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-600" />
+              </button>
             </div>
-          </div>
-        </div>
-      )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {filteredProducts.slice(0, 20).map(product => (
+                <button
+                  key={product._id}
+                  onClick={() => {
+                    assignScannedProduct(product, 1);
+                    setSearchTerm('');
 
-      {/* Receipt Modal */}
-      {showReceipt && lastBill && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6" id="receipt">
-              <div className="text-center mb-6">
-                <h2 className="text-xl font-bold">Your Store Name</h2>
-                <p className="text-sm text-gray-600">123 Store Address, City</p>
-                <p className="text-sm text-gray-600">Phone: +91 98765 43210</p>
-                <div className="border-t border-b border-gray-300 py-2 my-3">
-                  <p className="font-medium">SALES RECEIPT</p>
-                  <p className="text-sm">#{lastBill.billNumber}</p>
-                  <p className="text-sm">{lastBill.date.toLocaleString()}</p>
-                </div>
-              </div>
-
-              {/* Customer Info */}
-              {(lastBill.customer.name || lastBill.customer.phone) && (
-                <div className="mb-4">
-                  <h4 className="font-medium">Customer:</h4>
-                  {lastBill.customer.name && <p className="text-sm">{lastBill.customer.name}</p>}
-                  {lastBill.customer.phone && <p className="text-sm">{lastBill.customer.phone}</p>}
-                </div>
-              )}
-
-              {/* Items */}
-              <div className="mb-4">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-1">Item</th>
-                      <th className="text-center py-1">Qty</th>
-                      <th className="text-right py-1">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lastBill.items.map((item, index) => (
-                      <tr key={index} className="border-b">
-                        <td className="py-1">
-                          <div>{item.name}</div>
-                          <div className="text-xs text-gray-500">@₹{item.price.toLocaleString()}</div>
-                        </td>
-                        <td className="text-center py-1">{item.quantity}</td>
-                        <td className="text-right py-1">₹{(item.price * item.quantity).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Totals */}
-              <div className="border-t pt-3 space-y-1">
-                <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span>₹{lastBill.subtotal.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Tax:</span>
-                  <span>₹{lastBill.tax.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-lg font-bold">
-                  <span>Total:</span>
-                  <span>₹{lastBill.total.toLocaleString()}</span>
-                </div>
-                <div className="border-t pt-2">
-                  <div className="flex justify-between">
-                    <span>Payment Method:</span>
-                    <span className="capitalize">{lastBill.paymentMethod}</span>
+                  }}
+                  className="p-3 text-left bg-gray-50 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 shadow-sm hover:shadow-md"
+                >
+                  <div className="font-medium text-sm text-gray-900 truncate">{product.name}</div>
+                  <div className="text-xs text-gray-600 flex justify-between mt-1">
+                    <span>{product.productCode}</span>
+                    <span className="font-semibold text-green-600">{fmt(product.pricing?.offerPrice || 0)}</span>
                   </div>
-                  {lastBill.paymentMethod === 'cash' && (
-                    <>
-                      <div className="flex justify-between">
-                        <span>Received:</span>
-                        <span>₹{lastBill.receivedAmount.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Change:</span>
-                        <span>₹{lastBill.change.toLocaleString()}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="text-center mt-6 text-sm text-gray-600">
-                <p>Thank you for your business!</p>
-                <p>Visit again soon</p>
-              </div>
-            </div>
-
-            {/* Receipt Actions */}
-            <div className="p-4 border-t bg-gray-50 flex gap-3">
-              <button
-                onClick={printReceipt}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
-              >
-                <Receipt className="h-4 w-4" />
-                Print Receipt
-              </button>
-              <button
-                onClick={newSale}
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-              >
-                New Sale
-              </button>
+                  <div className="text-xs text-gray-500 mt-1">Stock: {product.inventory?.currentStock || 0}</div>
+                </button>
+              ))}
             </div>
           </div>
         </div>
       )}
+
+      {/* Search Input (floating) */}
+      <div className="fixed top-20 right-4 w-80 z-40">
+        <div className="relative">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            placeholder="Quick search products..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-300 rounded-lg shadow-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+          />
+        </div>
+      </div>
     </div>
   );
 };
