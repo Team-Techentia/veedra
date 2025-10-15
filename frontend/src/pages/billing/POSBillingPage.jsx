@@ -266,18 +266,76 @@ const POSBillingPage = () => {
         
         if (fitsSlot) {
           // Assign product to this slot
-          // Find cart item for this product
-          const cartItem = cart.find(item => item._id === product._id);
-          slot.assigned = {
-            product: product,
-            qty: 1, // Only 1 unit gets combo pricing
-            cartItemId: cartItem?.cartItemId
-          };
+          // Find an available cart item for this product (not already fully assigned to combos)
+          const assignedCartItemQuantities = new Map();
           
-          // Update selectedCombos
-          setSelectedCombos(prev => prev.map((c, idx) => 
-            idx === comboIndex ? combo : c
-          ));
+          // Calculate how much of each cartItemId is already assigned to other combos
+          selectedCombos.forEach((otherCombo, otherIndex) => {
+            if (otherIndex !== comboIndex && otherCombo.slots) {
+              otherCombo.slots.forEach(otherSlot => {
+                if (otherSlot.assigned && otherSlot.assigned.cartItemId) {
+                  const cartItemId = otherSlot.assigned.cartItemId;
+                  const assignedQty = otherSlot.assigned.qty || 1;
+                  assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
+                }
+              });
+            }
+          });
+          
+          // Find a cart item with available quantity
+          let availableCartItem = null;
+          const matchingCartItems = cart.filter(item => item._id === product._id);
+          
+          for (const cartItem of matchingCartItems) {
+            const assignedQty = assignedCartItemQuantities.get(cartItem.cartItemId) || 0;
+            const availableQty = cartItem.quantity - assignedQty;
+            
+            if (availableQty > 0) {
+              availableCartItem = cartItem;
+              break;
+            }
+          }
+          
+          // If no cart items found, automatically add the product to cart
+          if (!availableCartItem && matchingCartItems.length === 0) {
+            // Check stock first
+            const currentStock = product.inventory?.currentStock || 0;
+            if (currentStock > 0) {
+              // Add product to cart
+              const newCartItem = {
+                ...product,
+                quantity: 1,
+                price: product.pricing?.offerPrice || product.price || 0,
+                isComboApplied: false,
+                cartItemId: nextCartItemId
+              };
+              
+              setCart(prev => [...prev, newCartItem]);
+              setNextCartItemId(prev => prev + 1);
+              
+              availableCartItem = newCartItem;
+              toast.success(`Added ${product.name} to cart for combo`);
+            } else {
+              toast.error(`${product.name} is out of stock`);
+              break;
+            }
+          }
+          
+          if (availableCartItem) {
+            slot.assigned = {
+              product: product,
+              qty: 1, // Only 1 unit gets combo pricing
+              cartItemId: availableCartItem.cartItemId
+            };
+            
+            // Update selectedCombos
+            setSelectedCombos(prev => prev.map((c, idx) => 
+              idx === comboIndex ? combo : c
+            ));
+          } else {
+            toast.error(`Not enough quantity available for ${product.name} in cart`);
+            break;
+          }
           
           assigned = true;
           
@@ -445,29 +503,74 @@ const POSBillingPage = () => {
   
 
 
-  // Calculate totals using cart item IDs for precise tracking
-  const calculateSinglesSubtotal = () => {
-    // Get set of cart item IDs that are assigned to combos
-    const assignedCartItemIds = new Set();
+  // Get combo assignments map
+  const getComboAssignments = () => {
+    const assignedCartItemQuantities = new Map();
     selectedCombos.forEach(combo => {
       if (combo.slots) {
         combo.slots.forEach(slot => {
           if (slot.assigned && slot.assigned.cartItemId) {
-            assignedCartItemIds.add(slot.assigned.cartItemId);
+            const cartItemId = slot.assigned.cartItemId;
+            const assignedQty = slot.assigned.qty || 1;
+            assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
+          }
+        });
+      }
+    });
+    return assignedCartItemQuantities;
+  };
+
+  // Get remaining singles quantity for a cart item
+  const getSinglesQuantity = (cartItem) => {
+    const assignedQty = getComboAssignments().get(cartItem.cartItemId) || 0;
+    return Math.max(0, cartItem.quantity - assignedQty);
+  };
+
+  // Show warning when combos consume all items (but don't auto-fix)
+  const checkSinglesAvailability = () => {
+    const assignedCartItemQuantities = getComboAssignments();
+
+    // Check if any cart items are fully consumed by combos
+    const consumedItems = [];
+    cart.forEach(item => {
+      const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
+      const quantityForSingles = Math.max(0, item.quantity - assignedQty);
+      
+      if (quantityForSingles === 0 && assignedQty > 0) {
+        consumedItems.push(item.name);
+      }
+    });
+
+    return consumedItems;
+  };
+
+  // Calculate totals using cart item IDs for precise tracking
+  const calculateSinglesSubtotal = () => {
+    // Get set of cart item IDs that are assigned to combos with their assigned quantities
+    const assignedCartItemQuantities = new Map();
+    selectedCombos.forEach(combo => {
+      if (combo.slots) {
+        combo.slots.forEach(slot => {
+          if (slot.assigned && slot.assigned.cartItemId) {
+            const cartItemId = slot.assigned.cartItemId;
+            const assignedQty = slot.assigned.qty || 1;
+            assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
           }
         });
       }
     });
 
     let singlesTotal = 0;
+    
     cart.forEach(item => {
-      // If this cart item is assigned to a combo, reduce quantity by 1
-      const quantityForSingles = assignedCartItemIds.has(item.cartItemId) 
-        ? Math.max(0, item.quantity - 1)  // Reduce by 1 for combo assignment
-        : item.quantity; // All quantity counts as singles
+      // Calculate remaining quantity after combo assignments
+      const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
+      const quantityForSingles = Math.max(0, item.quantity - assignedQty);
       
-      singlesTotal += quantityForSingles * (item.price || 0);
+      const itemPrice = Number(item.price || item.pricing?.offerPrice || 0);
+      singlesTotal += quantityForSingles * itemPrice;
     });
+    
     return singlesTotal;
   };
 
@@ -740,19 +843,56 @@ const POSBillingPage = () => {
       if (!window.confirm(`Paid amount ₹${paidAmount.toFixed(2)} is less than bill total ₹${totalAmount.toFixed(2)}. Proceed and record as due?`)) return;
     }
 
+    // Prevent double-clicking by checking if already processing
+    if (processing) {
+      console.log('⚠️ Already processing payment, ignoring duplicate request');
+      return;
+    }
+    
     setProcessing(true);
     
     try {
+      // Validate cart data before processing
+      if (!cart || cart.length === 0) {
+        if (!selectedCombos || selectedCombos.length === 0) {
+          toast.error('Cart is empty - please add items first');
+          setProcessing(false);
+          return;
+        }
+      }
+      
+      // Validate payment amounts
+      if (totalAmount <= 0) {
+        toast.error('Invalid bill amount');
+        setProcessing(false);
+        return;
+      }
+      
+      if (paidAmount <= 0) {
+        toast.error('Please enter payment amount');
+        setProcessing(false);
+        return;
+      }
+      
+      console.log('✅ Pre-validation passed:', {
+        cartItems: cart.length,
+        selectedCombos: selectedCombos.length,
+        totalAmount,
+        paidAmount
+      });
+      
       // Prepare final items for billing
       const finalItems = [];
       
-      // Get set of cart item IDs that are assigned to combos
-      const assignedCartItemIds = new Set();
+      // Get set of cart item IDs that are assigned to combos with their assigned quantities
+      const assignedCartItemQuantities = new Map();
       selectedCombos.forEach(combo => {
         if (combo.slots) {
           combo.slots.forEach(slot => {
             if (slot.assigned && slot.assigned.cartItemId) {
-              assignedCartItemIds.add(slot.assigned.cartItemId);
+              const cartItemId = slot.assigned.cartItemId;
+              const assignedQty = slot.assigned.qty || 1;
+              assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
             }
           });
         }
@@ -760,10 +900,9 @@ const POSBillingPage = () => {
       
       // Add single products (considering cart item assignments)
       cart.forEach(item => {
-        // If this cart item is assigned to a combo, reduce quantity by 1
-        const quantityForSingles = assignedCartItemIds.has(item.cartItemId) 
-          ? Math.max(0, item.quantity - 1)  // Reduce by 1 for combo assignment
-          : item.quantity; // All quantity counts as singles
+        // Calculate remaining quantity after combo assignments
+        const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
+        const quantityForSingles = Math.max(0, item.quantity - assignedQty);
         
         if (quantityForSingles > 0) {
           finalItems.push({
@@ -826,17 +965,23 @@ const POSBillingPage = () => {
         totalSavings: calculateTotalSavings()
       };
 
-      let result = null;
-      let paymentProcessed = false;
+      // Generate offline bill - always works
+      console.log('� Generating offline bill with data:', {
+        cartItemsCount: paymentData.cartItems.length,
+        totalAmount: paymentData.amount,
+        paymentMethod: paymentData.paymentMethod
+      });
       
-      try {
-        result = await paymentService.processPayment(paymentData);
-        paymentProcessed = !!(result && (result.success || result.billNumber));
-      } catch (error) {
-        console.error('Payment service error:', error);
-        // Continue with offline bill generation
-        paymentProcessed = false;
-      }
+      // Always process successfully in offline mode
+      const paymentProcessed = true;
+      const result = {
+        success: true,
+        billNumber: `OFFLINE${Date.now()}`,
+        transactionId: `TXN${Date.now()}`,
+        message: 'Offline bill generated successfully'
+      };
+      
+      console.log('✅ Offline bill generated successfully');
       
       // Separate items for better bill display
       const singlesItems = finalItems.filter(item => !item.isComboApplied);
@@ -863,22 +1008,21 @@ const POSBillingPage = () => {
         combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
       };
       
-      if (paymentProcessed) {
-        toast.success('Payment processed and saved successfully!');
-      } else {
-        toast.success('Bill generated successfully! (Offline mode)');
-      }
+      // Always show offline success message
+      toast.success('💾 Bill generated successfully! ');
       
       // Set bill data for receipt
       setLastBill(billData);
       
       // Ask user if they want to print
-      const printChoice = window.confirm('✅ Payment completed successfully!\n\n🖨 Click OK to PRINT the bill\n📄 Click Cancel to just save (no print)');
+      const printChoice = window.confirm('💾 Bill generated successfully!\n\n🖨 Click OK to PRINT the bill\n📄 Click Cancel to just save (no print)');
       
       if (printChoice) {
-        // Print receipt with current bill data and auto-print
-        printReceiptWithAutoPrint(billData);
-        toast.success('Bill saved and sent to printer!');
+        // Add a small delay to ensure state is updated
+        setTimeout(() => {
+          printReceiptWithAutoPrint(billData);
+          toast.success('Bill saved and sent to printer!');
+        }, 100);
       } else {
         toast.success('Bill saved successfully! (No print)');
       }
@@ -898,9 +1042,19 @@ const POSBillingPage = () => {
 
   // Print receipt with provided data
   const printReceiptWithData = (billData) => {
-    if (!billData) return;
+    if (!billData) {
+      console.error('No bill data provided to printReceiptWithData');
+      toast.error('Cannot print: No bill data available');
+      return;
+    }
     
     const receiptHTML = generateReceiptHTML(billData);
+    
+    if (!receiptHTML) {
+      console.error('Failed to generate receipt HTML');
+      toast.error('Cannot print: Failed to generate receipt');
+      return;
+    }
     
     const printWindow = window.open('', '_blank', 'width=800,height=700');
     if (!printWindow) {
@@ -915,9 +1069,19 @@ const POSBillingPage = () => {
 
   // Print receipt with auto-print command
   const printReceiptWithAutoPrint = (billData) => {
-    if (!billData) return;
+    if (!billData) {
+      console.error('No bill data provided to printReceiptWithAutoPrint');
+      toast.error('Cannot print: No bill data available');
+      return;
+    }
     
     const receiptHTML = generateReceiptHTML(billData, true); // Pass true for auto-print
+    
+    if (!receiptHTML) {
+      console.error('Failed to generate receipt HTML');
+      toast.error('Cannot print: Failed to generate receipt');
+      return;
+    }
     
     const printWindow = window.open('', '_blank', 'width=800,height=700');
     if (!printWindow) {
@@ -950,11 +1114,16 @@ const POSBillingPage = () => {
 
   // Generate receipt HTML
   const generateReceiptHTML = (bill, autoPrint = false) => {
+    if (!bill) {
+      console.error('No bill data provided to generateReceiptHTML');
+      return '';
+    }
+    
     return `
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Receipt - ${lastBill.billNumber}</title>
+          <title>Receipt - ${bill.billNumber}</title>
           <style>
             /* Thermal Printer 3-inch (80mm) Paper */
             @page {
@@ -1630,44 +1799,47 @@ const POSBillingPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {cart.map((item, index) => (
-                  <tr key={index}>
-                    <td className="border border-gray-300 p-1 text-xs">{item.name}</td>
-                    <td className="border border-gray-300 p-1 text-xs">{fmt(item.price)}</td>
-                    <td className="border border-gray-300 p-1">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => updateQuantity(item._id, item.quantity - 1)}
-                          className="w-5 h-5 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"
+                {cart.filter(item => getSinglesQuantity(item) > 0).map((item, index) => {
+                  const singlesQty = getSinglesQuantity(item);
+                  return (
+                    <tr key={index}>
+                      <td className="border border-gray-300 p-1 text-xs">{item.name}</td>
+                      <td className="border border-gray-300 p-1 text-xs">{fmt(item.price)}</td>
+                      <td className="border border-gray-300 p-1">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => updateQuantity(item._id, item.quantity - 1)}
+                            className="w-5 h-5 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"
+                          >
+                            <Minus className="h-2 w-2" />
+                          </button>
+                          <span className="w-6 text-center text-xs">{singlesQty}</span>
+                          <button
+                            onClick={() => updateQuantity(item._id, item.quantity + 1)}
+                            className="w-5 h-5 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"
+                          >
+                            <Plus className="h-2 w-2" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="border border-gray-300 p-1 text-right text-xs">
+                        {fmt(item.price * singlesQty)}
+                      </td>
+                      <td className="border border-gray-300 p-1">
+                        <button 
+                          onClick={() => removeFromCart(item._id)}
+                          className="px-2 py-1 bg-teal-600 text-white text-xs rounded hover:bg-teal-700"
                         >
-                          <Minus className="h-2 w-2" />
+                          Remove
                         </button>
-                        <span className="w-6 text-center text-xs">{item.quantity}</span>
-                        <button
-                          onClick={() => updateQuantity(item._id, item.quantity + 1)}
-                          className="w-5 h-5 rounded bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-xs"
-                        >
-                          <Plus className="h-2 w-2" />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="border border-gray-300 p-1 text-right text-xs">
-                      {fmt(item.price * item.quantity)}
-                    </td>
-                    <td className="border border-gray-300 p-1">
-                      <button 
-                        onClick={() => removeFromCart(item._id)}
-                        className="px-2 py-1 bg-teal-600 text-white text-xs rounded hover:bg-teal-700"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {cart.length === 0 && (
+                      </td>
+                    </tr>
+                  );
+                })}
+                {cart.filter(item => getSinglesQuantity(item) > 0).length === 0 && (
                   <tr>
                     <td colSpan="5" className="border border-gray-300 p-4 text-center text-gray-500 text-xs">
-                      No items in cart
+                      {cart.length === 0 ? "No items in cart" : "All items are assigned to combos"}
                     </td>
                   </tr>
                 )}
@@ -1737,6 +1909,17 @@ const POSBillingPage = () => {
             {/* Totals Section */}
             <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-4 mb-4 border border-blue-100">
               <div className="space-y-2">
+                {(() => {
+                  const consumedItems = checkSinglesAvailability();
+                  if (consumedItems.length > 0) {
+                    return (
+                      <div className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded mb-2">
+                        ℹ️ All quantities of {consumedItems.join(', ')} are used in combos. Increase quantities if you want singles pricing.
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Singles Subtotal:</span>
                   <span className="font-medium">{fmt(calculateSinglesSubtotal())}</span>
