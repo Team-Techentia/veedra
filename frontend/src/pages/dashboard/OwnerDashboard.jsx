@@ -191,7 +191,7 @@ const OwnerDashboard = () => {
               <Package className="h-8 w-8 text-blue-600 mb-2" />
               <span className="text-sm font-medium">Add Product</span>
             </button>
-            <button 
+            {/* <button 
               onClick={() => navigate('/users')}
               className="flex flex-col items-center p-4 border rounded-lg hover:bg-gray-50 transition-colors"
             >
@@ -211,7 +211,7 @@ const OwnerDashboard = () => {
             >
               <ShoppingCart className="h-8 w-8 text-orange-600 mb-2" />
               <span className="text-sm font-medium">Process Order</span>
-            </button>
+            </button> */}
           </div>
         </CardContent>
       </Card>
