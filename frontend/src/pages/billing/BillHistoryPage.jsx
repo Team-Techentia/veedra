@@ -117,7 +117,7 @@ const BillHistoryPage = () => {
               margin: 2mm;
             }
             body { 
-              font-family: 'Courier New', monospace; 
+              font-family: 'Thermal Sans Mono', 'OCR-B', 'Courier New', 'Lucida Console', monospace; 
               font-size: 10px; 
               line-height: 1.3;
               margin: 0;

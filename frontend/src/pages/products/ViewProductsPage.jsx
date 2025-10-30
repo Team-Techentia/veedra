@@ -511,10 +511,12 @@ const getStickerDimensions = (size) => {
     }
     
     body {
-      margin: 10px;
-      padding: 10px;
-      font-family: Arial, sans-serif;
-    }
+  margin: 10px;
+  padding: 10px;
+  font-family: 'Thermal Sans Mono', 'OCR-B', 'Courier New', 'Lucida Console', monospace;
+  font-size: 18px; /* thoda bada for print clarity */
+  text-align: center; /* center me print karne ke liye */
+}
     
     .sticker {
       width: 70mm;
