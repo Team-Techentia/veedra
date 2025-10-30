@@ -317,26 +317,34 @@ const getStickerDimensions = (size) => {
       
       const styles = `
         <style>
-          body {
-            display: flex;
-            flex-wrap: wrap;
-            font-family: Arial, sans-serif;
-              padding: 3mm;
-            margin: 0;
-          }
-          .sticker {
-            width: ${dimensions.width};
-            height: ${dimensions.height};
-            margin: 2mm;
-            padding: 3mm;
-            border: 1px solid #000;
-            background: white;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            page-break-inside: avoid;
-          }
+        @page {
+  size: 75mm 50mm;    // 2×3 inch in mm
+  margin: 0mm;
+}
+         body {
+  display: flex;
+  flex-wrap: wrap;
+  font-family: Arial, sans-serif;
+  padding: 0;        /* remove internal padding */
+  margin: 0;
+  width: 75mm;       /* force body to sticker size */
+  height: 50mm;
+}
+
+.sticker {
+  width: 75mm;
+  height: 50mm;
+  margin: 0;         /* remove spacing */
+  padding: 3mm;
+  border: 1px solid #000;
+  background: white;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  page-break-inside: avoid;
+}
+
           .brand-name {
   font-size: ${parseInt(dimensions.fontSize) + 1}px;  // +2 se +1 karo
   margin-bottom: 1mm;  // 2mm se 1mm karo
@@ -361,10 +369,7 @@ const getStickerDimensions = (size) => {
   margin-top: 0.5mm;  // 1mm se 0.5mm karo
   letter-spacing: 0.5px;  // 1px se 0.5px karo
 }
-         @page {
-  size: A4;
-  margin: 3mm;  // 5mm se 3mm karo
-}
+ 
 @media print {
   body { margin: 0; padding: 3mm; }  // 2mm se 3mm karo
   .sticker { margin: 3mm; }  // 1mm se 3mm karo
