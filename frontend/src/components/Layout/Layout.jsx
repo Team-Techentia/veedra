@@ -65,10 +65,10 @@ const Layout = () => {
     { name: 'Vendors', href: '/vendors', icon: Users, roles: ['owner', 'manager'] },
     { name: 'Combos', href: '/combos', icon: Gift, roles: ['owner', 'manager'] },
     { name: 'Inventory', href: '/inventory', icon: Package, roles: ['owner', 'manager'] },
-    { name: 'Wallets', href: '/wallets', icon: Wallet, roles: ['owner', 'manager'] },
-    { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['owner', 'manager'] },
-    { name: 'Users', href: '/users', icon: Users, roles: ['owner'] },
-    { name: 'Settings', href: '/settings', icon: Settings, roles: ['owner', 'manager', 'staff'] },
+    // { name: 'Wallets', href: '/wallets', icon: Wallet, roles: ['owner', 'manager'] },
+    // { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['owner', 'manager'] },
+    // { name: 'Users', href: '/users', icon: Users, roles: ['owner'] },
+    // { name: 'Settings', href: '/settings', icon: Settings, roles: ['owner', 'manager', 'staff'] },
   ];
 
   const filteredNavigation = navigation.filter(item => 
