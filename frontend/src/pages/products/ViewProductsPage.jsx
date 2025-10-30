@@ -317,24 +317,25 @@ const getStickerDimensions = (size) => {
       
       const styles = `
         <style>
+    <style>
         @page {
-  size: 75mm 50mm;    // 2×3 inch in mm
+  size: 50mm 75mm;  /* Height x Width swap - landscape mode */
   margin: 0mm;
 }
-         body {
+ body {
   display: flex;
   flex-wrap: wrap;
-  font-family: Arial, sans-serif;
-  padding: 0;        /* remove internal padding */
+  font-family: 'OCR-B', 'Roboto Mono', 'Courier New', monospace;
+  padding: 0;
   margin: 0;
-  width: 75mm;       /* force body to sticker size */
+  width: 75mm;
   height: 50mm;
 }
 
 .sticker {
-  width: 75mm;
-  height: 50mm;
-  margin: 0;         /* remove spacing */
+  width: 50mm;
+  height: 75mm;
+  margin: 0;
   padding: 3mm;
   border: 1px solid #000;
   background: white;
@@ -343,7 +344,13 @@ const getStickerDimensions = (size) => {
   flex-direction: column;
   justify-content: space-between;
   page-break-inside: avoid;
+  
+  /* ✅ No rotation - already in correct orientation */
+  transform: none;
 }
+
+
+
 
           .brand-name {
   font-size: ${parseInt(dimensions.fontSize) + 1}px;  // +2 se +1 karo
@@ -371,7 +378,7 @@ const getStickerDimensions = (size) => {
 }
  
 @media print {
-  body { margin: 0; padding: 3mm; }  // 2mm se 3mm karo
+  body { margin: 0; padding: 3mm; transform: rotate(90deg); }  // 2mm se 3mm karo
   .sticker { margin: 3mm; }  // 1mm se 3mm karo
 }
         </style>
