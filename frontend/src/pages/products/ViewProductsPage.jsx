@@ -316,74 +316,89 @@ const getStickerDimensions = (size) => {
       const dimensions = getStickerDimensions(stickerSize);
       
       const styles = `
-        <style>
-    <style>
-        @page {
-  size: 50mm 75mm;  /* Height x Width swap - landscape mode */
-  margin: 0mm;
-}
- body {
-  display: flex;
-  flex-wrap: wrap;
-  font-family: 'OCR-B', 'Roboto Mono', 'Courier New', monospace;
-  padding: 0;
-  margin: 0;
-  width: 75mm;
-  height: 50mm;
-}
+  <style>
+    @page {
+      size: 75mm 50mm;
+      margin: 0;
+    }
+    
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
 
-.sticker {
-  width: 50mm;
-  height: 75mm;
-  margin: 0;
-  padding: 3mm;
-  border: 1px solid #000;
-  background: white;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  page-break-inside: avoid;
-  
-  /* ✅ No rotation - already in correct orientation */
-  transform: none;
-}
+    .sticker {
+      width: 70mm;
+      height: 45mm;
+      padding: 3mm;
+      border: 1px solid #000;
+      background: white;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      page-break-inside: avoid;
+    }
 
+    .brand-name {
+      justify-content: center;
+      font-size: ${parseInt(dimensions.fontSize) + 1}px;
+      font-weight: bold;
+      margin-bottom: 1mm;
+      padding-bottom: 0.5mm;
+    }
+    
+    .product-info {
+      font-size: ${parseInt(dimensions.fontSize) - 1}px;
+      line-height: 1.2;
+    }
+    
+    .info-line {
+      margin-bottom: 0.5mm;
+    }
+    
+    .label {
+      margin-right: 1mm;
+      font-weight: bold;
+    }
+    
+    .price-info {
+      margin: 1mm 0;
+      font-size: ${parseInt(dimensions.fontSize) - 2}px;
+    }
+    
+    .barcode {
+      text-align: center;
+      margin-top: auto;
+    }
+    
+    .barcode-code {
+      font-size: ${parseInt(dimensions.fontSize) - 2}px;
+      margin-top: 0.5mm;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
 
-
-
-          .brand-name {
-  font-size: ${parseInt(dimensions.fontSize) + 1}px;  // +2 se +1 karo
-  margin-bottom: 1mm;  // 2mm se 1mm karo
-  padding-bottom: 0.5mm;  // 1mm se 0.5mm karo
-}
-.product-info {
-  font-size: ${parseInt(dimensions.fontSize) - 1}px;
-  line-height: 1.2;  // 1.4 se 1.2 karo
-}
-.info-line {
-  margin-bottom: 0.5mm;  // 1mm se 0.5mm karo
-}
-.label {
-  margin-right: 1mm;  // 2mm se 1mm karo
-}
-.price-info {
-  margin: 1mm 0;  // 2mm se 1mm karo
-  font-size: ${parseInt(dimensions.fontSize) - 2}px;  // Add this line
-}
-.barcode-code {
-  font-size: ${parseInt(dimensions.fontSize) - 2}px;
-  margin-top: 0.5mm;  // 1mm se 0.5mm karo
-  letter-spacing: 0.5px;  // 1px se 0.5px karo
-}
- 
-@media print {
-  body { margin: 0; padding: 3mm; transform: rotate(90deg); }  // 2mm se 3mm karo
-  .sticker { margin: 3mm; }  // 1mm se 3mm karo
-}
-        </style>
-      `;
-
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      
+      .sticker, .sticker * {
+        visibility: visible;
+      }
+      
+      .sticker {
+        position: absolute;
+        left: 0;
+        top: 0;
+        margin: 0;
+        padding: 3mm;
+        border: none;
+      }
+    }
+  </style>
+`;
       const body = list.map((p, i) => {
         // Check if this is a combo product - check multiple possible fields
         const isCombo = p.type === 'combo' || 
@@ -489,81 +504,90 @@ const getStickerDimensions = (size) => {
                      (p.sku && p.sku.startsWith('CMB'));
       
       const styles = `
-        <style>
-          body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-family: Arial, sans-serif;
-            padding: 10mm;
-            min-height: 100vh;
-            margin: 0;
-          }
-          .sticker {
-            width: ${dimensions.width};
-            height: ${dimensions.height};
-            padding: 3mm;
-            border: 2px solid #000;
-            background: white;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-          }
-          .brand-name {
-            font-size: ${parseInt(dimensions.fontSize) + 2}px;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 2mm;
-            padding-bottom: 1mm;
-          }
-          .product-info {
-            font-size: ${parseInt(dimensions.fontSize) - 1}px;
-            line-height: 1.4;
-            flex: 1;
-          }
-          .info-line {
-            margin-bottom: 1mm;
-            display: flex;
-            align-items: center;
-          }
-          .label {
-            font-weight: bold;
-            margin-right: 2mm;
-          }
-          .underline {
-            border-bottom: 1px solid #000;
-            flex: 1;
-            height: 1.2em;
-            display: inline-block;
-          }
-          .price-info {
-            margin: 2mm 0;
-          }
-          .barcode {
-            text-align: center;
-            margin-top: auto;
-          }
-          .barcode svg {
-            max-width: 100%;
-            height: auto;
-          }
-          .barcode-code {
-            text-align: center;
-            font-size: ${parseInt(dimensions.fontSize) - 2}px;
-            margin-top: 1mm;
-            font-weight: bold;
-            letter-spacing: 1px;
-          }
-          @page {
-            size: A4;
-            margin: 5mm;
-          }
-          @media print {
-            body { margin: 0; padding: 5mm; }
-          }
-        </style>
-      `;
+  <style>
+    @page {
+      size: 75mm 50mm;
+      margin: 0;
+    }
+    
+    body {
+      margin: 10px;
+      padding: 10px;
+      font-family: Arial, sans-serif;
+    }
+    
+    .sticker {
+      width: 70mm;
+      height: 45mm;
+      padding: 3mm;
+      border: 1px solid #000;
+      background: white;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    
+    .brand-name {
+      font-size: ${parseInt(dimensions.fontSize) + 1}px;
+      font-weight: bold;
+      margin-bottom: 1mm;
+      padding-bottom: 0.5mm;
+    }
+    
+    .product-info {
+      font-size: ${parseInt(dimensions.fontSize) - 1}px;
+      line-height: 1.2;
+    }
+    
+    .info-line {
+      margin-bottom: 0.5mm;
+    }
+    
+    .label {
+      font-weight: bold;
+      margin-right: 1mm;
+    }
+    
+    .price-info {
+      margin: 1mm 0;
+      font-size: ${parseInt(dimensions.fontSize) - 2}px;
+    }
+    
+    .barcode {
+      text-align: center;
+      margin-top: auto;
+    }
+    
+    .barcode-code {
+      text-align: center;
+      font-size: ${parseInt(dimensions.fontSize) - 2}px;
+      margin-top: 0.5mm;
+      letter-spacing: 0.5px;
+    }
+    
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      
+      .sticker, .sticker * {
+        visibility: visible;
+      }
+      
+      .sticker {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 75mm;
+        height: 50mm;
+        margin: 0;
+        padding: 3mm;
+        border: none;
+      }
+    }
+  </style>
+`;
 
       const body = isCombo ? `
         <div class="sticker">
