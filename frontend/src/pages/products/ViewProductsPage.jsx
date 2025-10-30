@@ -18,10 +18,15 @@ const ViewProductsPage = () => {
   const printRef = useRef();
 
   // Get sticker dimensions based on selected size
-  const getStickerDimensions = (size) => {
-    // All sizes now use 3 inch × 2 inch (7.62cm × 5.08cm)
-    return { width: '7.62cm', height: '5.08cm', fontSize: '12px', barcodeHeight: '30' };
+const getStickerDimensions = (size) => {
+  return { 
+    width: '75mm', 
+    height: '50mm', 
+    fontSize: '9px', 
+    barcodeHeight: '22',
+    barcodeWidth: '1.0'
   };
+};
 
   useEffect(() => {
     loadProducts();
@@ -316,7 +321,7 @@ const ViewProductsPage = () => {
             display: flex;
             flex-wrap: wrap;
             font-family: Arial, sans-serif;
-            padding: 5mm;
+              padding: 3mm;
             margin: 0;
           }
           .sticker {
@@ -324,7 +329,7 @@ const ViewProductsPage = () => {
             height: ${dimensions.height};
             margin: 2mm;
             padding: 3mm;
-            border: 2px solid #000;
+            border: 1px solid #000;
             background: white;
             box-sizing: border-box;
             display: flex;
@@ -333,58 +338,37 @@ const ViewProductsPage = () => {
             page-break-inside: avoid;
           }
           .brand-name {
-            font-size: ${parseInt(dimensions.fontSize) + 2}px;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 2mm;
-            padding-bottom: 1mm;
-          }
-          .product-info {
-            font-size: ${parseInt(dimensions.fontSize) - 1}px;
-            line-height: 1.4;
-            flex: 1;
-          }
-          .info-line {
-            margin-bottom: 1mm;
-            display: flex;
-            align-items: center;
-          }
-          .label {
-            font-weight: bold;
-            margin-right: 2mm;
-          }
-          .underline {
-            border-bottom: 1px solid #000;
-            flex: 1;
-            height: 1.2em;
-            display: inline-block;
-          }
-          .price-info {
-            margin: 2mm 0;
-          }
-          .barcode {
-            text-align: center;
-            margin-top: auto;
-          }
-          .barcode svg {
-            max-width: 100%;
-            height: auto;
-          }
-          .barcode-code {
-            text-align: center;
-            font-size: ${parseInt(dimensions.fontSize) - 2}px;
-            margin-top: 1mm;
-            font-weight: bold;
-            letter-spacing: 1px;
-          }
-          @page {
-            size: A4;
-            margin: 5mm;
-          }
-          @media print {
-            body { margin: 0; padding: 2mm; }
-            .sticker { margin: 1mm; }
-          }
+  font-size: ${parseInt(dimensions.fontSize) + 1}px;  // +2 se +1 karo
+  margin-bottom: 1mm;  // 2mm se 1mm karo
+  padding-bottom: 0.5mm;  // 1mm se 0.5mm karo
+}
+.product-info {
+  font-size: ${parseInt(dimensions.fontSize) - 1}px;
+  line-height: 1.2;  // 1.4 se 1.2 karo
+}
+.info-line {
+  margin-bottom: 0.5mm;  // 1mm se 0.5mm karo
+}
+.label {
+  margin-right: 1mm;  // 2mm se 1mm karo
+}
+.price-info {
+  margin: 1mm 0;  // 2mm se 1mm karo
+  font-size: ${parseInt(dimensions.fontSize) - 2}px;  // Add this line
+}
+.barcode-code {
+  font-size: ${parseInt(dimensions.fontSize) - 2}px;
+  margin-top: 0.5mm;  // 1mm se 0.5mm karo
+  letter-spacing: 0.5px;  // 1px se 0.5px karo
+}
+         @page {
+  size: A4;
+  margin: 3mm;  // 5mm se 3mm karo
+}
+@media print {
+  body { margin: 0; padding: 3mm; }  // 2mm se 3mm karo
+  .sticker { margin: 3mm; }  // 1mm se 3mm karo
+}
         </style>
       `;
 
@@ -462,10 +446,10 @@ const ViewProductsPage = () => {
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
         <script>
           ${list.map((p, i) => `
-            JsBarcode("#barcode-${i}", "${p.code}", {
-              format: "CODE128",
-              width: ${stickerSize === 'thermal' || stickerSize === 'large' ? '1' : '1.5'},
-              height: ${dimensions.barcodeHeight},
+           JsBarcode("#barcode-${i}", "${p.code}", {
+  format: "CODE128",
+  width: 1.0,  // Fixed width
+  height: ${dimensions.barcodeHeight},
               displayValue: false,
               margin: 1
             });
@@ -627,9 +611,9 @@ const ViewProductsPage = () => {
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
         <script>
           JsBarcode("#barcode-single", "${p.code}", {
-            format: "CODE128",
-            width: ${stickerSize === 'thermal' || stickerSize === 'large' ? '1' : '1.5'},
-            height: ${dimensions.barcodeHeight},
+  format: "CODE128",
+  width: 1.0,  // Fixed width instead of conditional
+  height: ${dimensions.barcodeHeight},
             displayValue: false,
             margin: 1
           });
