@@ -514,7 +514,7 @@ const getStickerDimensions = (size) => {
   margin: 10px;
   padding: 10px;
   font-family: 'Thermal Sans Mono', 'OCR-B', 'Courier New', 'Lucida Console', monospace;
-  font-size: 18px; /* thoda bada for print clarity */
+  font-size: 22px; /* thoda bada for print clarity */
   text-align: center; /* center me print karne ke liye */
 }
     
@@ -531,14 +531,14 @@ const getStickerDimensions = (size) => {
     }
     
     .brand-name {
-      font-size: ${parseInt(dimensions.fontSize) + 1}px;
+      font-size: ${parseInt(dimensions.fontSize) + 4}px;
       font-weight: bold;
       margin-bottom: 1mm;
       padding-bottom: 0.5mm;
     }
     
     .product-info {
-      font-size: ${parseInt(dimensions.fontSize) - 1}px;
+      font-size: ${parseInt(dimensions.fontSize) +2}px;
       line-height: 1.2;
     }
     
