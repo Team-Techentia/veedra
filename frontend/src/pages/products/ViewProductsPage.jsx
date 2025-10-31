@@ -287,117 +287,121 @@ const getStickerDimensions = (size) => {
   };
 
   const printSelected = () => {
-    if (selectedProducts.size === 0) {
-      toast.error('Please select products to print');
-      return;
-    }
+  if (selectedProducts.size === 0) {
+    toast.error('Please select products to print');
+    return;
+  }
 
-    const selectedProductsData = [];
-    // Get all products (parents and children) that are selected
-    parentProducts.forEach(parent => {
-      if (selectedProducts.has(parent._id)) {
-        selectedProductsData.push(parent);
-      }
-      if (parent.children) {
-        parent.children.forEach(child => {
-          if (selectedProducts.has(child._id)) {
-            selectedProductsData.push(child);
-          }
-        });
-      }
-    });
-
-    if (selectedProductsData.length === 0) {
-      toast.error('No products selected to print');
-      return;
+  const selectedProductsData = [];
+  // Get all products (parents and children) that are selected
+  parentProducts.forEach(parent => {
+    if (selectedProducts.has(parent._id)) {
+      selectedProductsData.push(parent);
     }
-
-    const generateStickerHTML = (list) => {
-      const dimensions = getStickerDimensions(stickerSize);
-      
-      const styles = `
-  <style>
-    @page {
-      size: 75mm 50mm;
-      margin: 0;
+    if (parent.children) {
+      parent.children.forEach(child => {
+        if (selectedProducts.has(child._id)) {
+          selectedProductsData.push(child);
+        }
+      });
     }
+  });
+
+  if (selectedProductsData.length === 0) {
+    toast.error('No products selected to print');
+    return;
+  }
+
+  const generateStickerHTML = (list) => {
+    const dimensions = getStickerDimensions(stickerSize);
     
+    const styles = `
+<style>
+  @page {
+    size: 75mm 50mm;
+    margin: 0;
+  }
+  
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+    font-size: 22px;
+  }
+
+  .sticker {
+    width: 75mm;
+    height: 50mm;
+    padding: 3mm;
+    border: 1px solid #000;
+    background: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    page-break-after: always;
+    page-break-inside: avoid;
+    box-sizing: border-box;
+    position: relative;
+  }
+
+  .brand-name {
+    justify-content: center;
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    font-weight: bold;
+    margin-bottom: 1mm;
+    padding-bottom: 0.5mm;
+  }
+  
+  .product-info {
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    line-height: 1.2;
+  }
+  
+  .info-line {
+    margin-bottom: 0.5mm;
+  }
+  
+  .label {
+    margin-right: 1mm;
+    font-weight: bold;
+  }
+  
+  .price-info {
+    margin: 1mm 0;
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+  }
+  
+  .barcode {
+    text-align: center;
+    margin-top: auto;
+  }
+  
+  .barcode-code {
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    margin-top: 0.5mm;
+    letter-spacing: 0.5px;
+    text-align: center;
+  }
+
+  @media print {
     body {
       margin: 0;
       padding: 0;
-      font-family: Arial, sans-serif;
     }
-
+    
     .sticker {
-      width: 70mm;
-      height: 45mm;
+      margin: 0;
       padding: 3mm;
-      border: 1px solid #000;
-      background: white;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
+      border: none;
+      page-break-after: always;
       page-break-inside: avoid;
     }
-
-    .brand-name {
-      justify-content: center;
-      font-size: ${parseInt(dimensions.fontSize) + 1}px;
-      font-weight: bold;
-      margin-bottom: 1mm;
-      padding-bottom: 0.5mm;
-    }
     
-    .product-info {
-      font-size: ${parseInt(dimensions.fontSize) - 1}px;
-      line-height: 1.2;
+    .sticker:last-child {
+      page-break-after: auto;
     }
-    
-    .info-line {
-      margin-bottom: 0.5mm;
-    }
-    
-    .label {
-      margin-right: 1mm;
-      font-weight: bold;
-    }
-    
-    .price-info {
-      margin: 1mm 0;
-      font-size: ${parseInt(dimensions.fontSize) - 2}px;
-    }
-    
-    .barcode {
-      text-align: center;
-      margin-top: auto;
-    }
-    
-    .barcode-code {
-      font-size: ${parseInt(dimensions.fontSize) - 2}px;
-      margin-top: 0.5mm;
-      letter-spacing: 0.5px;
-      text-align: center;
-    }
-
-    @media print {
-      body * {
-        visibility: hidden;
-      }
-      
-      .sticker, .sticker * {
-        visibility: visible;
-      }
-      
-      .sticker {
-        position: absolute;
-        left: 0;
-        top: 0;
-        margin: 0;
-        padding: 3mm;
-        border: none;
-      }
-    }
-  </style>
+  }
+</style>
 `;
       const body = list.map((p, i) => {
         // Check if this is a combo product - check multiple possible fields
@@ -493,103 +497,94 @@ const getStickerDimensions = (size) => {
     printWindow.document.close();
   };
 
-  const printSingleProduct = (product) => {
-    const generateStickerHTML = (p) => {
-      const dimensions = getStickerDimensions(stickerSize);
-      const isCombo = p.type === 'combo' || 
-                     p.comboType || 
-                     p.isCombo || 
-                     (p.rules && p.rules.slots) ||
-                     p.offerPrice ||
-                     (p.sku && p.sku.startsWith('CMB'));
-      
-      const styles = `
-  <style>
-    @page {
-      size: 75mm 50mm;
-      margin: 0;
-    }
+const printSingleProduct = (product) => {
+  const generateStickerHTML = (p) => {
+    const dimensions = getStickerDimensions(stickerSize);
+    const isCombo = p.type === 'combo' || 
+                   p.comboType || 
+                   p.isCombo || 
+                   (p.rules && p.rules.slots) ||
+                   p.offerPrice ||
+                   (p.sku && p.sku.startsWith('CMB'));
     
+    const styles = `
+<style>
+  @page {
+    size: 75mm 50mm;
+    margin: 0;
+  }
+  
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+  }
+  
+  .sticker {
+    width: 75mm;
+    height: 50mm;
+    padding: 3mm;
+    border: 1px solid #000;
+    background: white;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  
+  .brand-name {
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    font-weight: bold;
+    margin-bottom: 1mm;
+    padding-bottom: 0.5mm;
+  }
+  
+  .product-info {
+    font-size: ${parseInt(dimensions.fontSize) +4}px;
+    line-height: 1.4;
+  }
+  
+  .info-line {
+    margin-bottom: 0.5mm;
+  }
+  
+  .label {
+    font-weight: bold;
+    margin-right: 1mm;
+  }
+  
+  .price-info {
+    margin: 1mm 0;
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+  }
+  
+  .barcode {
+    text-align: center;
+    margin-top: auto;
+  }
+  
+  .barcode-code {
+    text-align: center;
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    margin-top: 0.5mm;
+    letter-spacing: 0.5px;
+  }
+  
+  @media print {
     body {
-  margin: 10px;
-  padding: 10px;
-  font-family: selftester,arial,sans-serif;;
-  font-size: 22px; /* thoda bada for print clarity */
-  text-align: center; /* center me print karne ke liye */
-}
+      margin: 0;
+      padding: 0;
+    }
     
     .sticker {
-      width: 70mm;
-      height: 45mm;
+      margin: 0;
       padding: 3mm;
-      border: 1px solid #000;
-      background: white;
-      box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
+      border: none;
     }
-    
-    .brand-name {
-      font-size: ${parseInt(dimensions.fontSize) + 4}px;
-      font-weight: bold;
-      margin-bottom: 1mm;
-      padding-bottom: 0.5mm;
-    }
-    
-    .product-info {
-      font-size: ${parseInt(dimensions.fontSize) +4}px;
-      line-height: 1.4;
-    }
-    
-    .info-line {
-      margin-bottom: 0.5mm;
-    }
-    
-    .label {
-      font-weight: bold;
-      margin-right: 1mm;
-    }
-    
-    .price-info {
-      margin: 1mm 0;
-      font-size: ${parseInt(dimensions.fontSize) + 4}px;
-    }
-    
-    .barcode {
-      text-align: center;
-      margin-top: auto;
-    }
-    
-    .barcode-code {
-      text-align: center;
-      font-size: ${parseInt(dimensions.fontSize) + 4}px;
-      margin-top: 0.5mm;
-      letter-spacing: 0.5px;
-    }
-    
-    @media print {
-      body * {
-        visibility: hidden;
-      }
-      
-      .sticker, .sticker * {
-        visibility: visible;
-      }
-      
-      .sticker {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 75mm;
-        height: 50mm;
-        margin: 0;
-        padding: 3mm;
-        border: none;
-      }
-    }
-  </style>
+  }
+</style>
 `;
+    // ... baaki code same rahega
 
       const body = isCombo ? `
         <div class="sticker">
