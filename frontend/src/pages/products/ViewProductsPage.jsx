@@ -513,7 +513,7 @@ const getStickerDimensions = (size) => {
     body {
   margin: 10px;
   padding: 10px;
-  font-family: 'Thermal Sans Mono', 'OCR-B', 'Courier New', 'Lucida Console', monospace;
+  font-family: selftester,arial,sans-serif;;
   font-size: 22px; /* thoda bada for print clarity */
   text-align: center; /* center me print karne ke liye */
 }
@@ -538,8 +538,8 @@ const getStickerDimensions = (size) => {
     }
     
     .product-info {
-      font-size: ${parseInt(dimensions.fontSize) +2}px;
-      line-height: 1.2;
+      font-size: ${parseInt(dimensions.fontSize) +4}px;
+      line-height: 1.4;
     }
     
     .info-line {
@@ -553,7 +553,7 @@ const getStickerDimensions = (size) => {
     
     .price-info {
       margin: 1mm 0;
-      font-size: ${parseInt(dimensions.fontSize) - 2}px;
+      font-size: ${parseInt(dimensions.fontSize) + 4}px;
     }
     
     .barcode {
@@ -563,7 +563,7 @@ const getStickerDimensions = (size) => {
     
     .barcode-code {
       text-align: center;
-      font-size: ${parseInt(dimensions.fontSize) - 2}px;
+      font-size: ${parseInt(dimensions.fontSize) + 4}px;
       margin-top: 0.5mm;
       letter-spacing: 0.5px;
     }
