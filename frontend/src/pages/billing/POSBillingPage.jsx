@@ -1121,271 +1121,242 @@ const POSBillingPage = () => {
   };
 
   // Generate receipt HTML
-  const generateReceiptHTML = (bill, autoPrint = false) => {
-    if (!bill) {
-      console.error('No bill data provided to generateReceiptHTML');
-      return '';
-    }
-    
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Receipt - ${bill.billNumber}</title>
-          <style>
-            /* Thermal Printer 3-inch (80mm) Paper */
-            @page {
-              size: 80mm auto;
-              margin: 2mm;
-            }
+// Generate receipt HTML
+const generateReceiptHTML = (bill, autoPrint = false) => {
+  if (!bill) {
+    console.error('No bill data provided to generateReceiptHTML');
+    return '';
+  }
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Receipt - ${bill.billNumber}</title>
+        <style>
+          /* Thermal Printer 3-inch (80mm) Paper */
+          @page {
+            size: 80mm auto;
+            margin: 2mm;
+          }
+          body { 
+            font-family: Arial, sans-serif; 
+            font-size: 14px; 
+            font-weight: normal;
+            line-height: 1.4;
+            margin: 0;
+            padding: 3mm;
+            width: 76mm;
+            color: #000;
+          }
+          .center { text-align: center; }
+          .left { text-align: left; }
+          .right { text-align: right; }
+          .bold { font-weight: bold; }
+          .large { font-size: 18px; font-weight: bold; }
+          .medium { font-size: 15px; }
+          .small { font-size: 13px; }
+          .divider { 
+            border-top: 2px dashed #000; 
+            margin: 3mm 0; 
+            width: 100%;
+          }
+          .flex-between { 
+            display: flex; 
+            justify-content: space-between;
+            width: 100%;
+          }
+          .item-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+          }
+          @media print {
             body { 
-              font-family: 'Thermal Sans Mono', 'OCR-B', 'Courier New', 'Lucida Console', monospace; 
-              font-size: 10px; 
-              line-height: 1.3;
               margin: 0;
-              padding: 2mm;
-              width: 76mm; /* 3 inch - margins */
-              color: #000;
+              padding: 3mm;
+              width: 76mm;
             }
-            .center { text-align: center; }
-            .left { text-align: left; }
-            .right { text-align: right; }
-            .bold { font-weight: bold; }
-            .large { font-size: 12px; }
-            .small { font-size: 8px; }
-            .divider { 
-              border-top: 1px dashed #000; 
-              margin: 3mm 0; 
-              width: 100%;
+            .no-print { display: none; }
+            * { 
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
             }
-            .flex-between { 
-              display: flex; 
-              justify-content: space-between;
-              width: 100%;
-            }
-            .item-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 1px;
-            }
-            .item-name {
-              flex: 1;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-              max-width: 45mm;
-            }
-            .item-qty, .item-price {
-              text-align: right;
-              min-width: 15mm;
-            }
-            .table-header {
-              display: flex;
-              justify-content: space-between;
-              border-bottom: 1px solid #000;
-              padding-bottom: 1px;
-              margin-bottom: 2px;
-              font-weight: bold;
-            }
-            .table-row {
-              display: flex;
-              justify-content: space-between;
-              font-size: 8px;
-              margin-bottom: 1px;
-            }
-            .col-sl { width: 8mm; }
-            .col-item { width: 32mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-            .col-qty { width: 12mm; text-align: right; }
-            .col-rate { width: 12mm; text-align: right; }
-            .col-total { width: 12mm; text-align: right; font-weight: bold; }
-            @media print {
-              body { 
-                margin: 0;
-                padding: 2mm;
-                width: 76mm;
-              }
-              .no-print { display: none; }
-              * { 
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="center">
-            <div class="bold large">VEEDRA THE BRAND</div>
-            <div class="small">Wholesalers in Western Wear,</div>
-            <div class="small">Ethnic Wear & Indo-Western Wear</div>
-            <div class="small">1st Parallel Road, Durgigudi,</div>
-            <div class="small">Shimoga – 577201</div>
-            <div class="small">📞 Mobile: 70262 09627</div>
-            <div class="small">GSTIN: __________</div>
+          }
+        </style>
+      </head>
+      <body>
+        <div class="center">
+          <div class="bold large">VEEDRA THE BRAND</div>
+          <div class="medium">Wholesalers in Western Wear,</div>
+          <div class="medium">Ethnic Wear & Indo-Western Wear</div>
+          <div class="small">1st Parallel Road, Durgigudi,</div>
+          <div class="small">Shimoga – 577201</div>
+          <div class="small">📞 Mobile: 70262 09627</div>
+          <div class="small">GSTIN: __________</div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="center bold" style="font-size: 15px;">INVOICE</div>
+        
+        <div class="divider"></div>
+        
+        <div>
+          <div class="flex-between">
+            <span class="bold">Invoice:</span>
+            <span>${bill.billNumber}</span>
           </div>
-          
-          <div class="divider"></div>
-          
-          <div class="center bold">INVOICE</div>
-          
-          <div class="divider"></div>
-          
-          <div>
-            <div class="flex-between">
-              <span>Invoice: ${bill.billNumber}</span>
+          <div class="flex-between">
+            <span class="bold">Date:</span>
+            <span>${new Date(bill.date).toLocaleDateString()}</span>
+          </div>
+          <div class="flex-between">
+            <span class="bold">Time:</span>
+            <span>${new Date(bill.date).toLocaleTimeString()}</span>
+          </div>
+        </div>
+        
+        ${(bill.customer.name || bill.customer.phone) ? `
+        <div style="margin-top: 3mm;">
+          <div><span class="bold">Customer:</span> ${bill.customer.name || 'N/A'}</div>
+          <div><span class="bold">Mobile:</span> ${bill.customer.phone || 'N/A'}</div>
+        </div>
+        <div class="divider"></div>
+        ` : ''}
+        
+        ${bill.combos && bill.combos.length > 0 ? `
+        <div style="font-size: 10px; margin-bottom: 3mm;">
+          <div class="bold">COMBO OFFERS APPLIED:</div>
+          ${(bill.combos || []).map(combo => `
+            <div style="margin: 2mm 0; padding: 2mm; border: 1px dashed #666;">
+              <div class="bold" style="font-size: 11px;">${combo.name}</div>
+              <div style="font-size: 9px; color: #666;">Items priced proportionally at ₹${combo.offerPrice} total</div>
             </div>
-            <div class="flex-between">
-              <span>Date: ${new Date(bill.date).toLocaleDateString()}</span>
-              <span>Time: ${new Date(bill.date).toLocaleTimeString()}</span>
-            </div>
-          </div>
-          
-          ${(bill.customer.name || bill.customer.phone) ? `
-          <div>
-            <strong>Customer:</strong> ${bill.customer.name || 'N/A'}<br>
-            <strong>Mobile:</strong> ${bill.customer.phone || 'N/A'}
-          </div>
-          <div class="divider"></div>
-          ` : ''}
-          
-          ${bill.combos && bill.combos.length > 0 ? `
-          <div style="font-size: 8px; margin-bottom: 2mm;">
-            <div style="font-weight: bold;">COMBO OFFERS APPLIED:</div>
-            ${(bill.combos || []).map(combo => `
-              <div style="margin: 1mm 0; padding: 1mm; border: 1px dashed #666;">
-                <div style="font-weight: bold;">${combo.name}</div>
-                <div style="font-size: 7px; color: #666;">Items priced proportionally at ₹${combo.offerPrice} total</div>
-              </div>
-            `).join('')}
-          </div>
-          ` : ''}
+          `).join('')}
+        </div>
+        ` : ''}
 
-          <div class="divider"></div>
-          
-          <!-- Items Table Header -->
-          <div style="font-size: 8px; font-weight: bold; margin-bottom: 2px;">
-            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #000; padding-bottom: 1px;">
-              <span style="width: 8mm;">SL</span>
-              <span style="width: 25mm; text-align: left;">NAME</span>
-              <span style="width: 12mm; text-align: right;">MRP</span>
-              <span style="width: 12mm; text-align: right;">OFFER RATE</span>
-              <span style="width: 8mm; text-align: right;">QTY</span>
-              <span style="width: 12mm; text-align: right;">TOTAL</span>
+        <div class="divider"></div>
+        
+ text-align: left;" class="bold">NAME</span>
+            <span style="width: 12mm; text-align: right;" class="bold">MRP</span>
+            <span style="width: 12mm; text-align: right;" class="bold">OFFER</span>
+            <span style="width: 8mm; text-align: right;" class="bold">QTY</span>
+            <span style="width: 12mm; text-align: right;" class="bold">TOTAL</span>
+          </div>
+        </div>
+        
+        <!-- Single Items -->
+        ${bill.singlesItems && bill.singlesItems.length > 0 ? 
+          (bill.singlesItems || []).map((item, index) => `
+          <div style="font-size: 12px; margin-bottom: 2px;">
+            <div style="display: flex; justify-content: space-between;">
+              <span style="width: 8mm;">${index + 1}</span>
+              <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
+              <span style="width: 12mm; text-align: right;">${fmt(item.pricing?.mrp || item.price)}</span>
+              <span style="width: 12mm; text-align: right;">${fmt(item.pricing?.offerPrice || item.price)}</span>
+              <span style="width: 8mm; text-align: right;">${item.quantity}</span>
+              <span style="width: 12mm; text-align: right;" class="bold">${fmt((item.pricing?.offerPrice || item.price) * item.quantity)}</span>
             </div>
           </div>
-          
-          <!-- Single Items -->
-          ${bill.singlesItems && bill.singlesItems.length > 0 ? 
-            (bill.singlesItems || []).map((item, index) => `
-            <div style="font-size: 8px; margin-bottom: 1px;">
-              <div style="display: flex; justify-content: space-between;">
-                <span style="width: 8mm;">${index + 1}</span>
-                <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
-                <span style="width: 12mm; text-align: right;">${fmt(item.pricing?.mrp || item.price)}</span>
-                <span style="width: 12mm; text-align: right;">${fmt(item.pricing?.offerPrice || item.price)}</span>
-                <span style="width: 8mm; text-align: right;">${item.quantity}</span>
-                <span style="width: 12mm; text-align: right; font-weight: bold;">${fmt((item.pricing?.offerPrice || item.price) * item.quantity)}</span>
-              </div>
-            </div>
-          `).join('') : ''}
+        `).join('') : ''}
 
-          <!-- Combo Items -->
-          ${bill.comboItems && bill.comboItems.length > 0 ? 
-            (bill.comboItems || []).map((item, index) => {
-              const slNo = (bill.singlesItems?.length || 0) + index + 1;
-              return `
-            <div style="font-size: 8px; margin-bottom: 1px;">
-              <div style="display: flex; justify-content: space-between;">
-                <span style="width: 8mm;">${slNo}</span>
-                <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
-                <span style="width: 12mm; text-align: right;">${fmt(item.originalPrice || item.pricing?.mrp || 0)}</span>
-                <span style="width: 12mm; text-align: right;">${fmt(item.price)}</span>
-                <span style="width: 8mm; text-align: right;">${item.quantity}</span>
-                <span style="width: 12mm; text-align: right; font-weight: bold;">${fmt(item.price * item.quantity)}</span>
-              </div>
-              <div style="font-size: 7px; color: #666; margin-left: 8mm;">★ ${item.appliedComboName}</div>
+        <!-- Combo Items -->
+        ${bill.comboItems && bill.comboItems.length > 0 ? 
+          (bill.comboItems || []).map((item, index) => {
+            const slNo = (bill.singlesItems?.length || 0) + index + 1;
+            return `
+          <div style="font-size: 10px; margin-bottom: 2px;">
+            <div style="display: flex; justify-content: space-between;">
+              <span style="width: 8mm;">${slNo}</span>
+              <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
+              <span style="width: 12mm; text-align: right;">${fmt(item.originalPrice || item.pricing?.mrp || 0)}</span>
+              <span style="width: 12mm; text-align: right;">${fmt(item.price)}</span>
+              <span style="width: 8mm; text-align: right;">${item.quantity}</span>
+              <span style="width: 12mm; text-align: right;" class="bold">${fmt(item.price * item.quantity)}</span>
             </div>
-          `;}).join('') : ''}
-          
-
-
-          <div class="divider"></div>
-          
-          <div style="text-align:right">
-            ${(() => {
-              // Calculate GST breakdown for the total bill
-              const allItems = [
-                ...(bill.singlesItems || []),
-                ...(bill.comboItems || [])
-              ];
-              const gstBreakdown = calculateGSTBreakdown(bill.total, allItems);
-              
-              return `
-                <div>Taxable Amount: ${fmt(gstBreakdown.baseAmount)}</div>
-                <div>SGST (${gstBreakdown.sgstRate}%): ${fmt(gstBreakdown.sgst)}</div>
-                <div>CGST (${gstBreakdown.cgstRate}%): ${fmt(gstBreakdown.cgst)}</div>
-                <div style="margin-top: 8px;" class="divider"></div>
-                <div class="bold" style="font-size:1.2em">GRAND TOTAL: ${fmt(bill.total)}</div>
-                ${bill.discount > 0 ? `<div style="color:green">You Saved: ${fmt(bill.discount)}</div>` : ''}
-              `;
-            })()}
+            <div style="font-size: 9px; color: #666; margin-left: 8mm;">★ ${item.appliedComboName}</div>
           </div>
-          
-          <div class="divider"></div>
-          
-          <div>
-            <div>Payment: ${bill.paymentMethod.toUpperCase()}</div>
-            <div>Paid: ${fmt(bill.receivedAmount)}</div>
-            <div>Change: ${fmt(bill.change)}</div>
+        `;}).join('') : ''}
+        
+        <div class="divider"></div>
+        
+        <div style="text-align:right;">
+          ${(() => {
+            const allItems = [
+              ...(bill.singlesItems || []),
+              ...(bill.comboItems || [])
+            ];
+            const gstBreakdown = calculateGSTBreakdown(bill.total, allItems);
+            
+            return `
+              <div style="font-size: 12px;">Taxable Amount: ${fmt(gstBreakdown.baseAmount)}</div>
+              <div style="font-size: 12px;">SGST (${gstBreakdown.sgstRate}%): ${fmt(gstBreakdown.sgst)}</div>
+              <div style="font-size: 12px;">CGST (${gstBreakdown.cgstRate}%): ${fmt(gstBreakdown.cgst)}</div>
+              <div style="margin-top: 8px;" class="divider"></div>
+              <div class="bold" style="font-size: 16px;">GRAND TOTAL: ${fmt(bill.total)}</div>
+              ${bill.discount > 0 ? `<div style="color:green; font-size: 12px;">You Saved: ${fmt(bill.discount)}</div>` : ''}
+            `;
+          })()}
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div style="font-size: 12px;">
+          <div><span class="bold">Payment:</span> ${bill.paymentMethod.toUpperCase()}</div>
+          <div><span class="bold">Paid:</span> ${fmt(bill.receivedAmount)}</div>
+          <div><span class="bold">Change:</span> ${fmt(bill.change)}</div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="center bold medium">Terms & Conditions</div>
+        <div class="center small">
+          <div>No Exchange, No Return, No Guarantee.</div>
+          <div>Please verify items before leaving the store.</div>
+          <div>Working Hours: 8:00 AM – 9:00 PM</div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="center">
+          <div class="bold" style="font-size: 15px;">Thank You for Shopping at</div>
+          <div class="bold" style="font-size: 15px;">VEEDRA THE BRAND</div>
+          <div class="medium">Best Prices in Shimoga</div>
+          <div class="medium">Wholesale & Retail Available!</div>
+        </div>
+        
+        ${autoPrint ? `
+        <div class="no-print center" style="margin-top: 20px;">
+          <div style="color: #28a745; font-weight: bold; margin-bottom: 10px;">
+            📄 Printing... Please check your printer
           </div>
-          
-          <div class="divider"></div>
-          
-          <div class="center bold small">Terms & Conditions</div>
-          <div class="center small">
-            <div>No Exchange, No Return, No Guarantee.</div>
-            <div>Please verify items before leaving the store.</div>
-            <div>Working Hours: 8:00 AM – 9:00 PM</div>
-          </div>
-          
-          <div class="divider"></div>
-          
-          <div class="center">
-            <div class="bold">Thank You for Shopping at</div>
-            <div class="bold">VEEDRA THE BRAND</div>
-            <div class="small">Best Prices in Shimoga</div>
-            <div class="small">Wholesale & Retail Available!</div>
-          </div>
-          
-          ${autoPrint ? `
-          <div class="no-print center" style="margin-top: 20px;">
-            <div style="color: #28a745; font-weight: bold; margin-bottom: 10px;">
-              📄 Printing... Please check your printer
-            </div>
-            <button onclick="window.print();" 
-                    style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
-              🖨 Print Again
-            </button>
-            <button onclick="window.close();" 
-                    style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
-              ✕ Close
-            </button>
-          </div>
-          ` : `
-          <div class="no-print center" style="margin-top: 20px;">
-            <button onclick="window.print(); window.close();" 
-                    style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
-              🖨 Print Receipt
-            </button>
-            <button onclick="window.close();" 
-                    style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
-              ✕ Close
-            </button>
-          </div>
-          `}
-        </body>
-      </html>
-    `;
-  };
+          <button onclick="window.print();" 
+                  style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+            🖨 Print Again
+          </button>
+          <button onclick="window.close();" 
+                  style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px; font-weight: bold;">
+            ✕ Close
+          </button>
+        </div>
+        ` : `
+        <div class="no-print center" style="margin-top: 20px;">
+          <button onclick="window.print(); window.close();" 
+                  style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
+            🖨 Print Receipt
+          </button>
+          <button onclick="window.close();" 
+                  style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px; font-weight: bold;">
+            ✕ Close
+          </button>
+        </div>
+        `}
+      </body>
+    </html>
+  `;
+};
 
   // Print receipt - matches reference formatting (legacy function for preview)
   const printReceipt = () => {

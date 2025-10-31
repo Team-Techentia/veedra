@@ -481,141 +481,145 @@ const CombosPage = () => {
   };
 
   // For print (returns HTML string)
-  const renderStickerHTML = () => {
-    if (!formData.name || !formData.offerPrice) {
-      return '<div>Configure your combo first</div>';
-    }
+ const renderStickerHTML = () => {
+  if (!formData.name || !formData.offerPrice) {
+    return '<div>Configure your combo first</div>';
+  }
 
-    const fontSize = stickerConfig.size === 'S' ? '10px' : stickerConfig.size === 'L' ? '14px' : '12px';
-    const slotList = formData.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ');
-    
-    // Color mapping for background
-    const colorMap = { 
-      Blue: "#dbeafe", 
-      Green: "#dcfce7", 
-      Orange: "#ffedd5", 
-      Pink: "#fde2e8", 
-      Yellow: "#fef9c3", 
-      Purple: "#ede9fe", 
-      Red: "#fee2e2" 
-    };
-    const backgroundColor = colorMap[formData.colorTag] || "#ffffff";
-    
-    return `
+  const slotList = formData.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ');
+  
+  // Color mapping for background
+  const colorMap = { 
+    Blue: "#dbeafe", 
+    Green: "#dcfce7", 
+    Orange: "#ffedd5", 
+    Pink: "#fde2e8", 
+    Yellow: "#fef9c3", 
+    Purple: "#ede9fe", 
+    Red: "#fee2e2" 
+  };
+  const backgroundColor = colorMap[formData.colorTag] || "#ffffff";
+  
+  return `
+    <div style="
+      width: 75mm; 
+      height: 50mm; 
+      padding: 3mm; 
+      border: 2px solid #000; 
+      background: ${backgroundColor}; 
+      box-sizing: border-box; 
+      display: flex; 
+      flex-direction: column;
+      font-family: Arial, sans-serif;
+    ">
+      <!-- Header -->
       <div style="
-        width: 6cm; 
-        height: 4cm; 
-        padding: 2mm; 
-        border: 1px solid #000; 
-        background: ${backgroundColor}; 
-        box-sizing: border-box; 
-        display: flex; 
-        flex-direction: column; 
-        justify-content: space-between;
-        font-family: Arial, sans-serif;
-        font-size: 10px;
-        line-height: 1.2;
-      ">
-        <div style="
-          font-size: 16px; 
-          font-weight: bold; 
-          text-align: center; 
-          margin-bottom: 2mm; 
-          padding-bottom: 2mm;
-        ">VEEDRA THE BRAND</div>
+        font-size: 14px; 
+        font-weight: bold; 
+        text-align: center; 
+        margin-bottom: 3mm;
+        border-bottom: 1px solid #666;
+        padding-bottom: 2mm;
+      ">VEEDRA THE BRAND</div>
+      
+      <!-- Content -->
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 1.5mm;">
+        <!-- Name -->
+        <div style="display: flex; font-size: 11px;">
+          <span style="font-weight: bold; min-width: 35mm;">Name:</span>
+          <span style="flex: 1;">${formData.name || ''}</span>
+        </div>
         
-        <div style="font-size: 12px; line-height: 1.4; flex: 1;">
-          <div style="margin-bottom: 2mm; display: flex; align-items: center;">
-            <span style="font-weight: bold; margin-right: 2mm; font-size: 12px;">Name:</span>
-            <span style="flex: 1; height: 1.2em; display: inline-block; padding-left: 1mm; font-size: 12px;">${formData.name || ''}</span>
+        <!-- SKU -->
+        <div style="display: flex; font-size: 11px;">
+          <span style="font-weight: bold; min-width: 35mm;">SKU:</span>
+          <span>${formData.sku.trim() || generateComboSku()}</span>
+        </div>
+        
+        <!-- Type -->
+        <div style="display: flex; font-size: 11px;">
+          <span style="font-weight: bold; min-width: 35mm;">Type:</span>
+          <span style="text-transform: capitalize;">${formData.type || ''}</span>
+        </div>
+        
+        <!-- Price Slots -->
+        <div style="margin-top: 2mm; padding-top: 2mm; border-top: 1px solid #999;">
+          <div style="font-size: 10px; margin-bottom: 2mm;">
+            <strong>Price Slots:</strong> ${slotList || '₹350–400 | ₹570–700'}
           </div>
-          <div style="margin-bottom: 2mm; display: flex; align-items: center;">
-            <span style="font-weight: bold; margin-right: 2mm; font-size: 12px;">SKU:</span>
-            <span style="font-size: 12px;">${formData.sku.trim() || generateComboSku()}</span>
-          </div>
-          <div style="margin-bottom: 2mm; display: flex; align-items: center;">
-            <span style="font-weight: bold; margin-right: 2mm; font-size: 12px;">Type:</span>
-            <span style="flex: 1; height: 1.2em; display: inline-block; padding-left: 1mm; font-size: 12px;">${formData.type || ''}</span>
-          </div>
-          <div style="margin: 2mm 0; font-size: 11px;">
-            <div style="margin-bottom: 1mm;"><strong>Price Slots:</strong> ${slotList || '₹350–400 | ₹430–500'}</div>
-            <div style="font-size: 16px; font-weight: bold; white-space: nowrap;"><strong>Combo Offer Price: ₹${formData.offerPrice}</strong></div>
+          
+          <!-- Offer Price - Highlighted -->
+          <div style="
+           
+            color: black;
+            padding: 2mm 3mm;
+            border-radius: 2mm;
+            text-align: center;
+            margin-top: 7mm;
+            font-size: 16px;
+            font-weight: bold;
+           
+          ">
+            Combo Offer: ₹${formData.offerPrice}
           </div>
         </div>
       </div>
-    `;
-  };
+    </div>
+  `;
+};
 
-  const printSticker = () => {
-    const copies = Math.max(1, Number(stickerConfig.copies));
-    const w = window.open("", "_blank");
-    if (!w) {
-      toast.error('Please allow popups to print stickers');
-      return;
-    }
-    
-    const stickerHTML = renderStickerHTML();
-    const repeated = Array.from({ length: copies }).map(() => `<div class="sticker-container">${stickerHTML}</div>`).join("");
-    
-    w.document.write(`
-      <html>
-        <head>
-          <title>Print Combo Stickers</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <style>
-            @page { 
-              size: A4; 
-              margin: 10mm; 
-            }
-            * {
-              box-sizing: border-box;
-            }
+const printSticker = () => {
+  const copies = Math.max(1, Number(stickerConfig.copies));
+  const w = window.open("", "_blank");
+  if (!w) {
+    toast.error('Please allow popups to print stickers');
+    return;
+  }
+  
+  const stickerHTML = renderStickerHTML();
+  const repeated = Array.from({ length: copies }).map(() => stickerHTML).join("");
+  
+  w.document.write(`
+    <html>
+      <head>
+        <title>Print Combo Stickers</title>
+        <style>
+          @page { 
+            size: 75mm 50mm; 
+            margin: 0; 
+          }
+          * {
+            box-sizing: border-box;
+          }
+          body { 
+            font-family: Arial, sans-serif; 
+            margin: 0;
+            padding: 0;
+          }
+          .sticker-page {
+            width: 75mm;
+            height: 50mm;
+            page-break-after: always;
+            break-after: page;
+          }
+          @media print {
             body { 
-              font-family: Arial, sans-serif; 
-              margin: 0;
-              padding: 5mm;
-              display: flex; 
-              flex-wrap: wrap; 
-              justify-content: flex-start;
-              align-items: flex-start;
+              margin: 0; 
+              padding: 0; 
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
             }
-            .sticker-container { 
-              margin: 3mm; 
-              display: inline-block;
-              page-break-inside: avoid;
-              break-inside: avoid;
-            }
-            .sticker-container > div {
-              width: 3in !important;
-              height: 2in !important;
-              max-width: 3in !important;
-              max-height: 2in !important;
-              overflow: hidden;
-              font-size: 10px !important;
-              line-height: 1.2 !important;
-              padding: 2mm !important;
-            }
-            @media print {
-              body { 
-                margin: 0; 
-                padding: 5mm; 
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .sticker-container { 
-                margin: 2mm; 
-              }
-            }
-          </style>
-        </head>
-        <body>${repeated}</body>
-      </html>
-    `);
-    w.document.close();
-    w.focus();
-    w.print();
-    w.close();
-  };
+          }
+        </style>
+      </head>
+      <body>${repeated}</body>
+    </html>
+  `);
+  w.document.close();
+  w.focus();
+  w.print();
+  w.close();
+};
 
   // Filter combos
   const filteredCombos = combos.filter(combo => {
