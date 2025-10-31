@@ -1141,40 +1141,59 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           }
           body { 
             font-family: Arial, sans-serif; 
-            font-size: 14px; 
-            font-weight: normal;
-            line-height: 1.4;
+            font-size: 17px; 
+            font-weight: 500;
+            line-height: 1.5;
             margin: 0;
-            padding: 3mm;
+            padding: 4mm;
             width: 76mm;
             color: #000;
+            background: #fff;
           }
           .center { text-align: center; }
           .left { text-align: left; }
           .right { text-align: right; }
           .bold { font-weight: bold; }
-          .large { font-size: 18px; font-weight: bold; }
-          .medium { font-size: 15px; }
-          .small { font-size: 13px; }
+          .large { font-size: 22px; font-weight: bold; }
+          .medium { font-size: 18px; }
+          .small { font-size: 15px; }
           .divider { 
-            border-top: 2px dashed #000; 
-            margin: 3mm 0; 
+            border-top: 1px dashed #000; 
+            margin: 4mm 0; 
+            width: 100%;
+          }
+          .solid-divider {
+            border-top: 1px solid #000; 
+            margin: 2mm 0; 
             width: 100%;
           }
           .flex-between { 
             display: flex; 
             justify-content: space-between;
             width: 100%;
+            margin: 1mm 0;
+          }
+          .table-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 14px;
+            padding: 2mm 0;
+            border-top: 1px solid #000;
+            border-bottom: 1px solid #000;
+            margin: 2mm 0;
           }
           .item-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 2px;
+            font-size: 15px;
+            padding: 1mm 0;
+            line-height: 1.4;
           }
           @media print {
             body { 
               margin: 0;
-              padding: 3mm;
+              padding: 4mm;
               width: 76mm;
             }
             .no-print { display: none; }
@@ -1188,24 +1207,24 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
       <body>
         <div class="center">
           <div class="bold large">VEEDRA THE BRAND</div>
-          <div class="medium">Wholesalers in Western Wear,</div>
-          <div class="medium">Ethnic Wear & Indo-Western Wear</div>
+          <div class="small">Wholesalers in Western Wear,</div>
+          <div class="small">Ethnic Wear & Indo-Western Wear</div>
           <div class="small">1st Parallel Road, Durgigudi,</div>
           <div class="small">Shimoga – 577201</div>
-          <div class="small">📞 Mobile: 70262 09627</div>
+          <div class="small">Mobile: 70262 09627</div>
           <div class="small">GSTIN: __________</div>
         </div>
         
         <div class="divider"></div>
         
-        <div class="center bold" style="font-size: 15px;">INVOICE</div>
+        <div class="center bold medium">INVOICE</div>
         
         <div class="divider"></div>
         
-        <div>
+        <div style="font-size: 15px;">
           <div class="flex-between">
             <span class="bold">Invoice:</span>
-            <span>${bill.billNumber}</span>
+            <span class="bold">${bill.billNumber}</span>
           </div>
           <div class="flex-between">
             <span class="bold">Date:</span>
@@ -1213,52 +1232,56 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           </div>
           <div class="flex-between">
             <span class="bold">Time:</span>
-            <span>${new Date(bill.date).toLocaleTimeString()}</span>
+            <span class="bold">${new Date(bill.date).toLocaleTimeString()}</span>
           </div>
         </div>
         
         ${(bill.customer.name || bill.customer.phone) ? `
-        <div style="margin-top: 3mm;">
-          <div><span class="bold">Customer:</span> ${bill.customer.name || 'N/A'}</div>
-          <div><span class="bold">Mobile:</span> ${bill.customer.phone || 'N/A'}</div>
+        <div style="margin-top: 3mm; font-size: 15px;">
+          <div class="flex-between">
+            <span class="bold">Customer:</span>
+            <span class="bold">${bill.customer.name || 'N/A'}</span>
+          </div>
+          <div class="flex-between">
+            <span class="bold">Mobile:</span>
+            <span>${bill.customer.phone || 'N/A'}</span>
+          </div>
         </div>
-        <div class="divider"></div>
         ` : ''}
         
+        <div class="divider"></div>
+        
         ${bill.combos && bill.combos.length > 0 ? `
-        <div style="font-size: 10px; margin-bottom: 3mm;">
+        <div style="font-size: 14px; margin-bottom: 3mm;">
           <div class="bold">COMBO OFFERS APPLIED:</div>
           ${(bill.combos || []).map(combo => `
             <div style="margin: 2mm 0; padding: 2mm; border: 1px dashed #666;">
-              <div class="bold" style="font-size: 11px;">${combo.name}</div>
-              <div style="font-size: 9px; color: #666;">Items priced proportionally at ₹${combo.offerPrice} total</div>
+              <div class="bold">${combo.name}</div>
+              <div style="font-size: 13px;">Total: ₹${combo.offerPrice}</div>
             </div>
           `).join('')}
         </div>
-        ` : ''}
-
         <div class="divider"></div>
+        ` : ''}
         
- text-align: left;" class="bold">NAME</span>
-            <span style="width: 12mm; text-align: right;" class="bold">MRP</span>
-            <span style="width: 12mm; text-align: right;" class="bold">OFFER</span>
-            <span style="width: 8mm; text-align: right;" class="bold">QTY</span>
-            <span style="width: 12mm; text-align: right;" class="bold">TOTAL</span>
-          </div>
+        <!-- Table Header -->
+        <div class="table-header">
+          <span style="width: 8mm;">SL</span>
+          <span style="width: 24mm; text-align: left;">DESCRIPTION</span>
+          <span style="width: 11mm; text-align: right;">RATE</span>
+          <span style="width: 8mm; text-align: right;">QTY</span>
+          <span style="width: 14mm; text-align: right;">AMOUNT</span>
         </div>
         
         <!-- Single Items -->
         ${bill.singlesItems && bill.singlesItems.length > 0 ? 
           (bill.singlesItems || []).map((item, index) => `
-          <div style="font-size: 12px; margin-bottom: 2px;">
-            <div style="display: flex; justify-content: space-between;">
-              <span style="width: 8mm;">${index + 1}</span>
-              <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
-              <span style="width: 12mm; text-align: right;">${fmt(item.pricing?.mrp || item.price)}</span>
-              <span style="width: 12mm; text-align: right;">${fmt(item.pricing?.offerPrice || item.price)}</span>
-              <span style="width: 8mm; text-align: right;">${item.quantity}</span>
-              <span style="width: 12mm; text-align: right;" class="bold">${fmt((item.pricing?.offerPrice || item.price) * item.quantity)}</span>
-            </div>
+          <div class="item-row">
+            <span style="width: 8mm; font-weight: bold;">${index + 1}.</span>
+            <span style="width: 24mm; text-align: left; word-wrap: break-word; line-height: 1.3;">${item.name}</span>
+            <span style="width: 11mm; text-align: right; font-weight: bold;">${fmt(item.pricing?.offerPrice || item.price)}</span>
+            <span style="width: 8mm; text-align: right;">${item.quantity}</span>
+            <span style="width: 14mm; text-align: right; font-weight: bold;">${fmt((item.pricing?.offerPrice || item.price) * item.quantity)}</span>
           </div>
         `).join('') : ''}
 
@@ -1267,64 +1290,110 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           (bill.comboItems || []).map((item, index) => {
             const slNo = (bill.singlesItems?.length || 0) + index + 1;
             return `
-          <div style="font-size: 10px; margin-bottom: 2px;">
-            <div style="display: flex; justify-content: space-between;">
-              <span style="width: 8mm;">${slNo}</span>
-              <span style="width: 25mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
-              <span style="width: 12mm; text-align: right;">${fmt(item.originalPrice || item.pricing?.mrp || 0)}</span>
-              <span style="width: 12mm; text-align: right;">${fmt(item.price)}</span>
-              <span style="width: 8mm; text-align: right;">${item.quantity}</span>
-              <span style="width: 12mm; text-align: right;" class="bold">${fmt(item.price * item.quantity)}</span>
-            </div>
-            <div style="font-size: 9px; color: #666; margin-left: 8mm;">★ ${item.appliedComboName}</div>
+          <div class="item-row">
+            <span style="width: 8mm; font-weight: bold;">${slNo}.</span>
+            <span style="width: 24mm; text-align: left; word-wrap: break-word; line-height: 1.3;">${item.name}</span>
+            <span style="width: 11mm; text-align: right; font-weight: bold;">${fmt(item.price)}</span>
+            <span style="width: 8mm; text-align: right;">${item.quantity}</span>
+            <span style="width: 14mm; text-align: right; font-weight: bold;">${fmt(item.price * item.quantity)}</span>
+          </div>
+          <div style="font-size: 13px; padding-left: 8mm; color: #333;">
+            ★ ${item.appliedComboName}
           </div>
         `;}).join('') : ''}
         
-        <div class="divider"></div>
+        <div class="solid-divider"></div>
         
-        <div style="text-align:right;">
+        <!-- Totals Section -->
+        <div style="font-size: 15px; margin-top: 3mm;">
           ${(() => {
             const allItems = [
               ...(bill.singlesItems || []),
               ...(bill.comboItems || [])
             ];
+            const totalItems = allItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
             const gstBreakdown = calculateGSTBreakdown(bill.total, allItems);
             
             return `
-              <div style="font-size: 12px;">Taxable Amount: ${fmt(gstBreakdown.baseAmount)}</div>
-              <div style="font-size: 12px;">SGST (${gstBreakdown.sgstRate}%): ${fmt(gstBreakdown.sgst)}</div>
-              <div style="font-size: 12px;">CGST (${gstBreakdown.cgstRate}%): ${fmt(gstBreakdown.cgst)}</div>
-              <div style="margin-top: 8px;" class="divider"></div>
-              <div class="bold" style="font-size: 16px;">GRAND TOTAL: ${fmt(bill.total)}</div>
-              ${bill.discount > 0 ? `<div style="color:green; font-size: 12px;">You Saved: ${fmt(bill.discount)}</div>` : ''}
+              <div class="flex-between">
+                <span>Total Items:</span>
+                <span class="bold">${allItems.length}</span>
+              </div>
+              <div class="flex-between">
+                <span>Item Qty:</span>
+                <span class="bold">${totalItems}</span>
+              </div>
+              <div class="solid-divider" style="margin: 3mm 0;"></div>
+              <div class="flex-between">
+                <span class="bold">Total:</span>
+                <span class="bold">${fmt(bill.total)}</span>
+              </div>
+              <div class="flex-between">
+                <span>Discount:</span>
+                <span class="bold">${fmt(bill.discount || 0)}</span>
+              </div>
+              <div class="solid-divider"></div>
+              <div class="flex-between bold" style="font-size: 19px;">
+                <span>Net Payable:</span>
+                <span>${fmt(bill.total)}</span>
+              </div>
+              <div class="divider"></div>
+              <div class="flex-between">
+                <span class="bold">Given Amount:</span>
+                <span class="bold">${fmt(bill.receivedAmount)}</span>
+              </div>
+              <div class="flex-between">
+                <span>Return Amount:</span>
+                <span class="bold">${fmt(bill.change)}</span>
+              </div>
+              <div class="divider"></div>
+              <div class="center bold small">TAX SUMMARY</div>
+              <div style="display: flex; justify-content: space-between; font-size: 14px; margin-top: 2mm;">
+                <span style="width: 15mm; font-weight: bold;">Tax %</span>
+                <span style="width: 18mm; text-align: right;">Taxable Amt</span>
+                <span style="width: 12mm; text-align: right; font-weight: bold;">SGST</span>
+                <span style="width: 12mm; text-align: right;">CGST</span>
+                <span style="width: 14mm; text-align: right; font-weight: bold;">Total GST</span>
+              </div>
+              <div class="solid-divider" style="margin: 1mm 0;"></div>
+              <div style="display: flex; justify-content: space-between; font-size: 14px;">
+                <span style="width: 15mm; font-weight: bold;">${gstBreakdown.cgstRate * 2}%</span>
+                <span style="width: 18mm; text-align: right;">${fmt(gstBreakdown.baseAmount)}</span>
+                <span style="width: 12mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst)}</span>
+                <span style="width: 12mm; text-align: right;">${fmt(gstBreakdown.cgst)}</span>
+                <span style="width: 14mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst + gstBreakdown.cgst)}</span>
+              </div>
             `;
           })()}
         </div>
         
         <div class="divider"></div>
         
-        <div style="font-size: 12px;">
-          <div><span class="bold">Payment:</span> ${bill.paymentMethod.toUpperCase()}</div>
-          <div><span class="bold">Paid:</span> ${fmt(bill.receivedAmount)}</div>
-          <div><span class="bold">Change:</span> ${fmt(bill.change)}</div>
-        </div>
-        
-        <div class="divider"></div>
-        
-        <div class="center bold medium">Terms & Conditions</div>
-        <div class="center small">
-          <div>No Exchange, No Return, No Guarantee.</div>
-          <div>Please verify items before leaving the store.</div>
-          <div>Working Hours: 8:00 AM – 9:00 PM</div>
+        <div style="font-size: 15px;">
+          <div class="flex-between">
+            <span class="bold">Payment:</span>
+            <span>${bill.paymentMethod.toUpperCase()}</span>
+          </div>
         </div>
         
         <div class="divider"></div>
         
         <div class="center">
-          <div class="bold" style="font-size: 15px;">Thank You for Shopping at</div>
-          <div class="bold" style="font-size: 15px;">VEEDRA THE BRAND</div>
-          <div class="medium">Best Prices in Shimoga</div>
-          <div class="medium">Wholesale & Retail Available!</div>
+          <div class="bold small">Terms & Conditions</div>
+          <div style="font-size: 14px; margin-top: 2mm;">
+            <div>No Exchange, No Return, No Guarantee.</div>
+            <div>Please verify items before leaving.</div>
+            <div>Working Hours: 8:00 AM – 9:00 PM</div>
+          </div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="center">
+          <div class="bold medium">Thank You for Shopping at</div>
+          <div class="bold medium">VEEDRA THE BRAND</div>
+          <div class="small">Best Prices in Shimoga</div>
+          <div class="small">Wholesale & Retail Available!</div>
         </div>
         
         ${autoPrint ? `
