@@ -1128,7 +1128,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
     return '';
   }
   
-  return `
+ return `
     <!DOCTYPE html>
     <html>
       <head>
@@ -1141,12 +1141,12 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           }
           body { 
             font-family: Arial, sans-serif; 
-            font-size: 17px; 
+            font-size: 13px; 
             font-weight: 500;
-            line-height: 1.5;
+            line-height: 1.4;
             margin: 0;
-            padding: 4mm;
-            width: 76mm;
+            padding: 4mm 6mm;
+            width: 68mm;
             color: #000;
             background: #fff;
           }
@@ -1154,12 +1154,12 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           .left { text-align: left; }
           .right { text-align: right; }
           .bold { font-weight: bold; }
-          .large { font-size: 22px; font-weight: bold; }
-          .medium { font-size: 18px; }
-          .small { font-size: 15px; }
+          .large { font-size: 18px; font-weight: bold; }
+          .medium { font-size: 15px; }
+          .small { font-size: 12px; }
           .divider { 
             border-top: 1px dashed #000; 
-            margin: 4mm 0; 
+            margin: 3mm 0; 
             width: 100%;
           }
           .solid-divider {
@@ -1177,7 +1177,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             display: flex;
             justify-content: space-between;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 11px;
             padding: 2mm 0;
             border-top: 1px solid #000;
             border-bottom: 1px solid #000;
@@ -1186,15 +1186,15 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           .item-row {
             display: flex;
             justify-content: space-between;
-            font-size: 15px;
+            font-size: 12px;
             padding: 1mm 0;
-            line-height: 1.4;
+            line-height: 1.3;
           }
           @media print {
             body { 
               margin: 0;
-              padding: 4mm;
-              width: 76mm;
+              padding: 4mm 6mm;
+              width: 68mm;
             }
             .no-print { display: none; }
             * { 
@@ -1221,7 +1221,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         
         <div class="divider"></div>
         
-        <div style="font-size: 15px;">
+        <div style="font-size: 12px;">
           <div class="flex-between">
             <span class="bold">Invoice:</span>
             <span class="bold">${bill.billNumber}</span>
@@ -1237,7 +1237,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         </div>
         
         ${(bill.customer.name || bill.customer.phone) ? `
-        <div style="margin-top: 3mm; font-size: 15px;">
+        <div style="margin-top: 3mm; font-size: 12px;">
           <div class="flex-between">
             <span class="bold">Customer:</span>
             <span class="bold">${bill.customer.name || 'N/A'}</span>
@@ -1252,12 +1252,12 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         <div class="divider"></div>
         
         ${bill.combos && bill.combos.length > 0 ? `
-        <div style="font-size: 14px; margin-bottom: 3mm;">
+        <div style="font-size: 11px; margin-bottom: 3mm;">
           <div class="bold">COMBO OFFERS APPLIED:</div>
           ${(bill.combos || []).map(combo => `
             <div style="margin: 2mm 0; padding: 2mm; border: 1px dashed #666;">
               <div class="bold">${combo.name}</div>
-              <div style="font-size: 13px;">Total: ₹${combo.offerPrice}</div>
+              <div style="font-size: 10px;">Total: ₹${combo.offerPrice}</div>
             </div>
           `).join('')}
         </div>
@@ -1267,10 +1267,10 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         <!-- Table Header -->
         <div class="table-header">
           <span style="width: 8mm;">SL</span>
-          <span style="width: 24mm; text-align: left;">DESCRIPTION</span>
-          <span style="width: 11mm; text-align: right;">RATE</span>
-          <span style="width: 8mm; text-align: right;">QTY</span>
-          <span style="width: 14mm; text-align: right;">AMOUNT</span>
+          <span style="width: 22mm; text-align: left;">NAME</span>
+          <span style="width: 10mm; text-align: right;">MRP</span>
+          <span style="width: 7mm; text-align: right;">QTY</span>
+          <span style="width: 13mm; text-align: right;">AMOUNT</span>
         </div>
         
         <!-- Single Items -->
@@ -1278,10 +1278,10 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           (bill.singlesItems || []).map((item, index) => `
           <div class="item-row">
             <span style="width: 8mm; font-weight: bold;">${index + 1}.</span>
-            <span style="width: 24mm; text-align: left; word-wrap: break-word; line-height: 1.3;">${item.name}</span>
-            <span style="width: 11mm; text-align: right; font-weight: bold;">${fmt(item.pricing?.offerPrice || item.price)}</span>
-            <span style="width: 8mm; text-align: right;">${item.quantity}</span>
-            <span style="width: 14mm; text-align: right; font-weight: bold;">${fmt((item.pricing?.offerPrice || item.price) * item.quantity)}</span>
+            <span style="width: 22mm; text-align: left; word-wrap: break-word; line-height: 1.2;">${item.name}</span>
+            <span style="width: 10mm; text-align: right; font-weight: bold;">${fmt(item.pricing?.offerPrice || item.price)}</span>
+            <span style="width: 7mm; text-align: right;">${item.quantity}</span>
+            <span style="width: 13mm; text-align: right; font-weight: bold;">${fmt((item.pricing?.offerPrice || item.price) * item.quantity)}</span>
           </div>
         `).join('') : ''}
 
@@ -1292,12 +1292,12 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             return `
           <div class="item-row">
             <span style="width: 8mm; font-weight: bold;">${slNo}.</span>
-            <span style="width: 24mm; text-align: left; word-wrap: break-word; line-height: 1.3;">${item.name}</span>
-            <span style="width: 11mm; text-align: right; font-weight: bold;">${fmt(item.price)}</span>
-            <span style="width: 8mm; text-align: right;">${item.quantity}</span>
-            <span style="width: 14mm; text-align: right; font-weight: bold;">${fmt(item.price * item.quantity)}</span>
+            <span style="width: 22mm; text-align: left; word-wrap: break-word; line-height: 1.2;">${item.name}</span>
+            <span style="width: 10mm; text-align: right; font-weight: bold;">${fmt(item.price)}</span>
+            <span style="width: 7mm; text-align: right;">${item.quantity}</span>
+            <span style="width: 13mm; text-align: right; font-weight: bold;">${fmt(item.price * item.quantity)}</span>
           </div>
-          <div style="font-size: 13px; padding-left: 8mm; color: #333;">
+          <div style="font-size: 10px; padding-left: 8mm; color: #333;">
             ★ ${item.appliedComboName}
           </div>
         `;}).join('') : ''}
@@ -1305,7 +1305,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         <div class="solid-divider"></div>
         
         <!-- Totals Section -->
-        <div style="font-size: 15px; margin-top: 3mm;">
+        <div style="font-size: 12px; margin-top: 3mm;">
           ${(() => {
             const allItems = [
               ...(bill.singlesItems || []),
@@ -1333,7 +1333,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span class="bold">${fmt(bill.discount || 0)}</span>
               </div>
               <div class="solid-divider"></div>
-              <div class="flex-between bold" style="font-size: 19px;">
+              <div class="flex-between bold" style="font-size: 15px;">
                 <span>Net Payable:</span>
                 <span>${fmt(bill.total)}</span>
               </div>
@@ -1348,20 +1348,20 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
               </div>
               <div class="divider"></div>
               <div class="center bold small">TAX SUMMARY</div>
-              <div style="display: flex; justify-content: space-between; font-size: 14px; margin-top: 2mm;">
-                <span style="width: 15mm; font-weight: bold;">Tax %</span>
-                <span style="width: 18mm; text-align: right;">Taxable Amt</span>
-                <span style="width: 12mm; text-align: right; font-weight: bold;">SGST</span>
-                <span style="width: 12mm; text-align: right;">CGST</span>
-                <span style="width: 14mm; text-align: right; font-weight: bold;">Total GST</span>
+              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 2mm;">
+                <span style="width: 13mm; font-weight: bold;">Tax %</span>
+                <span style="width: 16mm; text-align: right;">Taxable Amt</span>
+                <span style="width: 11mm; text-align: right; font-weight: bold;">SGST</span>
+                <span style="width: 11mm; text-align: right;">CGST</span>
+                <span style="width: 13mm; text-align: right; font-weight: bold;">Total GST</span>
               </div>
               <div class="solid-divider" style="margin: 1mm 0;"></div>
-              <div style="display: flex; justify-content: space-between; font-size: 14px;">
-                <span style="width: 15mm; font-weight: bold;">${gstBreakdown.cgstRate * 2}%</span>
-                <span style="width: 18mm; text-align: right;">${fmt(gstBreakdown.baseAmount)}</span>
-                <span style="width: 12mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst)}</span>
-                <span style="width: 12mm; text-align: right;">${fmt(gstBreakdown.cgst)}</span>
-                <span style="width: 14mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst + gstBreakdown.cgst)}</span>
+              <div style="display: flex; justify-content: space-between; font-size: 11px;">
+                <span style="width: 13mm; font-weight: bold;">${gstBreakdown.cgstRate * 2}%</span>
+                <span style="width: 16mm; text-align: right;">${fmt(gstBreakdown.baseAmount)}</span>
+                <span style="width: 11mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst)}</span>
+                <span style="width: 11mm; text-align: right;">${fmt(gstBreakdown.cgst)}</span>
+                <span style="width: 13mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst + gstBreakdown.cgst)}</span>
               </div>
             `;
           })()}
@@ -1369,7 +1369,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         
         <div class="divider"></div>
         
-        <div style="font-size: 15px;">
+        <div style="font-size: 12px;">
           <div class="flex-between">
             <span class="bold">Payment:</span>
             <span>${bill.paymentMethod.toUpperCase()}</span>
@@ -1380,7 +1380,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         
         <div class="center">
           <div class="bold small">Terms & Conditions</div>
-          <div style="font-size: 14px; margin-top: 2mm;">
+          <div style="font-size: 11px; margin-top: 2mm;">
             <div>No Exchange, No Return, No Guarantee.</div>
             <div>Please verify items before leaving.</div>
             <div>Working Hours: 8:00 AM – 9:00 PM</div>

@@ -21,6 +21,7 @@ const getProducts = asyncHandler(async (req, res) => {
     .populate('category', 'name')
     .populate('subcategory', 'name')
     .populate('vendor', 'name')
+    .select('+specifications.size +specifications.color')
     .sort({ createdAt: -1 });
   
   // Separate parents and children

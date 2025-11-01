@@ -20,7 +20,7 @@ const CombosPage = () => {
     sku: '',
     name: '',
     type: 'outfit',
-    colorTag: 'Blue',
+    // colorTag: 'Blue',
     validFrom: '',
     validTo: '',
     offerPrice: '',
@@ -322,7 +322,7 @@ const CombosPage = () => {
       sku: '',
       name: '',
       type: 'outfit',
-      colorTag: 'Blue',
+      // colorTag: 'Blue',
       validFrom: '',
       validTo: '',
       offerPrice: '',
@@ -389,7 +389,7 @@ const CombosPage = () => {
       Purple: "#ede9fe", 
       Red: "#fee2e2" 
     };
-    const backgroundColor = colorMap[formData.colorTag] || "#ffffff";
+    const backgroundColor = "#ffffff";
 
     return (
       <div 
@@ -498,7 +498,7 @@ const CombosPage = () => {
     Purple: "#ede9fe", 
     Red: "#fee2e2" 
   };
-  const backgroundColor = colorMap[formData.colorTag] || "#ffffff";
+  const backgroundColor = "#ffffff";
   
   return `
     <div style="
@@ -863,18 +863,6 @@ const printSticker = () => {
                   >
                     {comboTypes.map(type => (
                       <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Sticker Color</label>
-                  <select
-                    value={formData.colorTag}
-                    onChange={(e) => handleInputChange('colorTag', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    {['Blue', 'Green', 'Orange', 'Pink', 'Yellow', 'Purple', 'Red'].map(color => (
-                      <option key={color} value={color}>{color}</option>
                     ))}
                   </select>
                 </div>

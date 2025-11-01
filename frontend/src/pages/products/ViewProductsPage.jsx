@@ -683,6 +683,39 @@ const printSingleProduct = (product) => {
     const globalIndex = indexOfFirstProduct + index + 1;
     const hasChildren = product.children && product.children.length > 0;
 
+    // Calculate total quantity including children
+    const getTotalQuantity = (prod) => {
+      let total = (prod.inventory?.currentStock || 0) + (prod.totalSold || 0);
+      if (prod.children && prod.children.length > 0) {
+        prod.children.forEach(child => {
+          total += (child.inventory?.currentStock || 0) + (child.totalSold || 0);
+        });
+      }
+      return total;
+    };
+
+    // Calculate total available stock including children
+    const getTotalAvailable = (prod) => {
+      let total = prod.inventory?.currentStock || 0;
+      if (prod.children && prod.children.length > 0) {
+        prod.children.forEach(child => {
+          total += child.inventory?.currentStock || 0;
+        });
+      }
+      return total;
+    };
+
+    // Calculate total sold including children
+    const getTotalSold = (prod) => {
+      let total = prod.totalSold || 0;
+      if (prod.children && prod.children.length > 0) {
+        prod.children.forEach(child => {
+          total += child.totalSold || 0;
+        });
+      }
+      return total;
+    };
+
     // Make the entire parent row clickable for expansion/collapse
     const handleRowClick = (e) => {
       // Don't trigger row click if clicking on checkbox, buttons, or inputs
@@ -695,75 +728,81 @@ const printSingleProduct = (product) => {
     };
 
     return (
-      <tr
-        key={product._id}
-        className={isChild ? 'child-row' : (hasChildren ? 'parent-row' : '')}
-        onClick={handleRowClick}
+  <tr
+    key={product._id}
+    className={isChild ? 'child-row' : (hasChildren ? 'parent-row' : '')}
+    onClick={handleRowClick}
+  >
+    <td>{isChild ? '' : globalIndex}</td>
+    <td>
+      <input
+        type="checkbox"
+        checked={selectedProducts.has(product._id)}
+        onChange={() => toggleSelection(product._id)}
+        onClick={e => e.stopPropagation()}
+      />
+    </td>
+    <td>
+      {hasChildren && (
+        <span className="toggle-icon">
+          {expandedBundles.has(product._id) ? '➖' : '➕'}
+        </span>
+      )}
+    </td>
+    <td>{product.name}</td>
+    <td>{product.code}</td>
+    <td>{product.category?.name || '-'}</td>
+    <td>{product.subcategory?.name || '-'}</td>
+    <td>{product.specifications?.size || '-'}</td>
+    <td>{product.specifications?.color || '-'}</td>
+    <td>{product.type || '-'}</td>
+    <td>{formatDate(product.createdAt)}</td>
+    <td>{calculateAge(product.createdAt)}</td>
+    <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
+      {isChild ? (product.inventory?.currentStock || 0) + (product.totalSold || 0) : getTotalQuantity(product)}
+    </td>
+    <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
+      {isChild ? product.inventory?.currentStock || 0 : getTotalAvailable(product)}
+    </td>
+    <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
+      {isChild ? product.totalSold || 0 : getTotalSold(product)}
+    </td>
+    <td>₹{product.pricing?.factoryPrice || '-'}</td>
+    <td>₹{product.pricing?.offerPrice || '-'}</td>
+    <td>₹{product.pricing?.discountedPrice || '-'}</td>
+    <td>{product.pricing?.mrp ? `₹${product.pricing.mrp}` : '-'}</td>
+    <td>{product.isActive !== undefined ? (product.isActive ? 'Available' : 'Inactive') : '-'}</td>
+    <td>
+      <svg 
+        ref={(el) => {
+          if (el) {
+            setTimeout(() => renderBarcode(el, product.code), 0);
+          }
+        }}
+        className="barcode-label"
+      />
+    </td>
+    <td>
+      <button 
+        onClick={e => { e.stopPropagation(); editProduct(product._id); }}
+        className="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
+        title="Edit Product"
       >
-        <td>{isChild ? '' : globalIndex}</td>
-        <td>
-          <input
-            type="checkbox"
-            checked={selectedProducts.has(product._id)}
-            onChange={() => toggleSelection(product._id)}
-            onClick={e => e.stopPropagation()}
-          />
-        </td>
-        <td>
-          {hasChildren && (
-            <span className="toggle-icon">
-              {expandedBundles.has(product._id) ? '➖' : '➕'}
-            </span>
-          )}
-        </td>
-        <td>{product.name}</td>
-        <td>{product.code}</td>
-        <td>{product.category?.name || '-'}</td>
-        <td>{product.subcategory?.name || '-'}</td>
-        <td>{product.specifications?.size || '-'}</td>
-        <td>{product.specifications?.color || '-'}</td>
-        <td>{product.type || '-'}</td>
-        <td>{formatDate(product.createdAt)}</td>
-        <td>{calculateAge(product.createdAt)}</td>
-        <td>{(product.inventory?.currentStock || 0) + (product.totalSold || 0)}</td>
-        <td>{product.inventory?.currentStock || 0}</td>
-        <td>{product.totalSold || 0}</td>
-        <td>₹{product.pricing?.factoryPrice || '-'}</td>
-        <td>₹{product.pricing?.offerPrice || '-'}</td>
-        <td>₹{product.pricing?.discountedPrice || '-'}</td>
-        <td>{product.pricing?.mrp ? `₹${product.pricing.mrp}` : '-'}</td>
-        <td>{product.isActive !== undefined ? (product.isActive ? 'Available' : 'Inactive') : '-'}</td>
-        <td>
-          <svg 
-            ref={(el) => {
-              if (el) {
-                setTimeout(() => renderBarcode(el, product.code), 0);
-              }
-            }}
-            className="barcode-label"
-          />
-        </td>
-        <td>
-          <button 
-            onClick={e => { e.stopPropagation(); editProduct(product._id); }}
-            className="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
-            title="Edit Product"
-          >
-            <Edit className="h-4 w-4" />
-          </button>
-        </td>
-        <td>
-          <button onClick={e => { e.stopPropagation(); printSingleProduct(product); }}>
-            🖨️
-          </button>
-        </td>
-        <td>
-          <button onClick={e => { e.stopPropagation(); deleteProduct(product._id); }}>
-            ❌
-          </button>
-        </td>
-      </tr>
-    );
+        <Edit className="h-4 w-4" />
+      </button>
+    </td>
+    <td>
+      <button onClick={e => { e.stopPropagation(); printSingleProduct(product); }}>
+        🖨️
+      </button>
+    </td>
+    <td>
+      <button onClick={e => { e.stopPropagation(); deleteProduct(product._id); }}>
+        ❌
+      </button>
+    </td>
+  </tr>
+);
   };
 
   if (loading) {
