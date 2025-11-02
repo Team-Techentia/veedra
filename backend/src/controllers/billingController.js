@@ -207,7 +207,7 @@ const createBill = asyncHandler(async (req, res) => {
 // Get all bills
 const getBills = asyncHandler(async (req, res) => {
   try {
-    const { page = 1, limit = 20, startDate, endDate, search } = req.query;
+    const { page = 1, limit = 1000, startDate, endDate, search } = req.query;
 
     // Build query
     let query = {};
