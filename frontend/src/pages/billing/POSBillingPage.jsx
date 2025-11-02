@@ -246,10 +246,16 @@ const POSBillingPage = () => {
 
   // Assignment logic - Auto-assign to active combo first
   const assignScannedProduct = (product, qty = 1) => {
+    // Check stock availability first
+    const currentStock = product.inventory?.currentStock || 0;
+    if (currentStock < qty) {
+      toast.error(`Insufficient stock! Available: ${currentStock}`);
+      return;
+    }
+
     let assigned = false;
     // Use discounted price for combo slot validation
     const productMRP = product.pricing?.discountedPrice || product.pricing?.offerPrice || product.price || 0;
-
     // Strategy: Try most recent combo first (last added), then work backwards
     for (let comboIndex = selectedCombos.length - 1; comboIndex >= 0; comboIndex--) {
       const combo = selectedCombos[comboIndex];
@@ -362,35 +368,39 @@ const POSBillingPage = () => {
       if (assigned) break;
     }
 
-    if (!assigned) {
+  if (!assigned) {
       // Add to single products
       const existingItem = cart.find(item => item._id === product._id);
       
       if (existingItem) {
-        if (existingItem.quantity + qty <= (product.inventory?.currentStock || 0)) {
+        const newQuantity = existingItem.quantity + qty;
+        const availableStock = product.inventory?.currentStock || 0;
+        
+        if (newQuantity <= availableStock) {
           setCart(prev => prev.map(item =>
             item._id === product._id
-              ? { ...item, quantity: item.quantity + qty }
+              ? { ...item, quantity: newQuantity }
               : item
           ));
-          toast.success(`Updated ${product.name} quantity to ${existingItem.quantity + qty}`);
+          toast.success(`Updated ${product.name} quantity to ${newQuantity}`);
         } else {
-          toast.error('Insufficient stock');
+          toast.error(`Insufficient stock! Available: ${availableStock}, Requested: ${newQuantity}`);
         }
       } else {
-        setCart(prev => [...prev, {
-          ...product,
-          quantity: qty,
-          price: product.pricing?.offerPrice || product.price || 0, // Singles always use offer price
-          isComboApplied: false,
-          cartItemId: nextCartItemId
-        }]);
-        setNextCartItemId(prev => prev + 1);
+        const availableStock = product.inventory?.currentStock || 0;
         
-        if (selectedCombos.length > 0) {
-
+        if (qty <= availableStock) {
+          setCart(prev => [...prev, {
+            ...product,
+            quantity: qty,
+            price: product.pricing?.offerPrice || product.price || 0,
+            isComboApplied: false,
+            cartItemId: nextCartItemId
+          }]);
+          setNextCartItemId(prev => prev + 1);
+          toast.success(`Added ${product.name} to cart`);
         } else {
-
+          toast.error(`Insufficient stock! Available: ${availableStock}, Requested: ${qty}`);
         }
       }
     }
@@ -482,15 +492,22 @@ const POSBillingPage = () => {
   };
 
   // Update quantity
-  const updateQuantity = (productId, newQuantity) => {
+ const updateQuantity = (productId, newQuantity) => {
     if (newQuantity === 0) {
       removeFromCart(productId);
       return;
     }
 
     const product = products.find(p => p._id === productId);
-    if (!product || newQuantity > (product.inventory?.currentStock || 0)) {
-      toast.error('Insufficient stock');
+    const availableStock = product?.inventory?.currentStock || 0;
+    
+    if (!product) {
+      toast.error('Product not found');
+      return;
+    }
+    
+    if (newQuantity > availableStock) {
+      toast.error(`Insufficient stock! Available: ${availableStock}`);
       return;
     }
 
@@ -828,225 +845,252 @@ const POSBillingPage = () => {
   };
 
   // Finalize and print - matches reference
-  const finalizeAndPrint = async () => {
-    if (cart.length === 0 && selectedCombos.length === 0) {
-      toast.error('Cart is empty');
-      return;
-    }
+  // Finalize and print - FIXED VERSION
+const finalizeAndPrint = async () => {
+  if (cart.length === 0 && selectedCombos.length === 0) {
+    toast.error('Cart is empty');
+    return;
+  }
 
-    // Validate customer info
-    const mobile = customerInfo.phone.trim();
-    const name = customerInfo.name.trim() || "Customer";
-    
-    if (mobile && !/^\d{10}$/.test(mobile)) {
-      if (!window.confirm("Customer mobile invalid. Continue without saving customer?")) return;
-    }
+  // Validate customer info
+  const mobile = customerInfo.phone.trim();
+  const name = customerInfo.name.trim() || "Customer";
+  
+  if (mobile && !/^\d{10}$/.test(mobile)) {
+    if (!window.confirm("Customer mobile invalid. Continue without saving customer?")) return;
+  }
 
-    const totalAmount = calculateGrandTotal();
-    const paidAmount = Number(paymentAmounts.cash) + Number(paymentAmounts.upi);
-    
-    if (paidAmount < totalAmount) {
-      if (!window.confirm(`Paid amount ₹${paidAmount.toFixed(2)} is less than bill total ₹${totalAmount.toFixed(2)}. Proceed and record as due?`)) return;
-    }
+  const totalAmount = calculateGrandTotal();
+  const paidAmount = Number(paymentAmounts.cash) + Number(paymentAmounts.upi);
+  
+  if (paidAmount < totalAmount) {
+    if (!window.confirm(`Paid amount ₹${paidAmount.toFixed(2)} is less than bill total ₹${totalAmount.toFixed(2)}. Proceed and record as due?`)) return;
+  }
 
-    // Prevent double-clicking by checking if already processing
-    if (processing) {
-      console.log('⚠️ Already processing payment, ignoring duplicate request');
-      return;
-    }
+  // Prevent double-clicking
+  if (processing) {
+    console.log('⚠️ Already processing payment, ignoring duplicate request');
+    return;
+  }
+  
+  setProcessing(true);
+  
+  try {
+    console.log('✅ Starting bill generation...');
     
-    setProcessing(true);
+    // Prepare final items for billing
+    const finalItems = [];
     
+    // Get set of cart item IDs that are assigned to combos
+    const assignedCartItemQuantities = new Map();
+    selectedCombos.forEach(combo => {
+      if (combo.slots) {
+        combo.slots.forEach(slot => {
+          if (slot.assigned && slot.assigned.cartItemId) {
+            const cartItemId = slot.assigned.cartItemId;
+            const assignedQty = slot.assigned.qty || 1;
+            assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
+          }
+        });
+      }
+    });
+    
+    // Add single products
+    cart.forEach(item => {
+      const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
+      const quantityForSingles = Math.max(0, item.quantity - assignedQty);
+      
+      if (quantityForSingles > 0) {
+        finalItems.push({
+          ...item,
+          quantity: quantityForSingles,
+          price: item.pricing?.offerPrice || item.price || 0,
+          originalPrice: item.pricing?.mrp || item.price || 0,
+          isComboApplied: false
+        });
+      }
+    });
+    
+    // Add combo products with adjusted pricing
+    selectedCombos.forEach(combo => {
+      const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+      if (allSlotsFilled) {
+        combo.slots.forEach(slot => {
+          if (slot.assigned) {
+            const adjustedPrice = calculateAdjustedPrice(combo, slot);
+            
+            finalItems.push({
+              ...slot.assigned.product,
+              quantity: slot.assigned.qty,
+              price: adjustedPrice,
+              originalPrice: slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0,
+              isComboApplied: true,
+              appliedComboName: combo.name,
+              comboPrice: adjustedPrice
+            });
+          }
+        });
+      }
+    });
+
+    // Separate items for bill
+    const singlesItems = finalItems.filter(item => !item.isComboApplied);
+    const comboItems = finalItems.filter(item => item.isComboApplied);
+
+    // Create bill data structure
+    const billData = {
+      billNumber: `B${Date.now()}`,
+      transactionId: `TXN${Date.now()}`,
+      date: new Date(),
+      customer: {
+        name: name,
+        phone: mobile
+      },
+      items: finalItems,
+      singlesItems: singlesItems,
+      comboItems: comboItems,
+      subtotal: calculateSinglesSubtotal(),
+      combosTotal: calculateCombosSubtotal(),
+      total: totalAmount,
+      discount: calculateTotalSavings(),
+      paymentMethod: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? 'mix' : 
+                    paymentAmounts.cash > 0 ? 'cash' : 'upi',
+      receivedAmount: paidAmount,
+      change: Math.max(0, paidAmount - totalAmount),
+      combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
+    };
+    
+    console.log('💾 Bill data prepared:', billData);
+    
+    // Try to save to backend (optional - don't block printing)
     try {
-      // Validate cart data before processing
-      if (!cart || cart.length === 0) {
-        if (!selectedCombos || selectedCombos.length === 0) {
-          toast.error('Cart is empty - please add items first');
-          setProcessing(false);
-          return;
-        }
-      }
-      
-      // Validate payment amounts
-      if (totalAmount <= 0) {
-        toast.error('Invalid bill amount');
-        setProcessing(false);
-        return;
-      }
-      
-      if (paidAmount <= 0) {
-        toast.error('Please enter payment amount');
-        setProcessing(false);
-        return;
-      }
-      
-      console.log('✅ Pre-validation passed:', {
-        cartItems: cart.length,
-        selectedCombos: selectedCombos.length,
-        totalAmount,
-        paidAmount
-      });
-      
-      // Prepare final items for billing
-      const finalItems = [];
-      
-      // Get set of cart item IDs that are assigned to combos with their assigned quantities
-      const assignedCartItemQuantities = new Map();
-      selectedCombos.forEach(combo => {
-        if (combo.slots) {
-          combo.slots.forEach(slot => {
-            if (slot.assigned && slot.assigned.cartItemId) {
-              const cartItemId = slot.assigned.cartItemId;
-              const assignedQty = slot.assigned.qty || 1;
-              assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
-            }
-          });
-        }
-      });
-      
-      // Add single products (considering cart item assignments)
-      cart.forEach(item => {
-        // Calculate remaining quantity after combo assignments
-        const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
-        const quantityForSingles = Math.max(0, item.quantity - assignedQty);
-        
-        if (quantityForSingles > 0) {
-          finalItems.push({
-            ...item,
-            quantity: quantityForSingles,
-            price: item.pricing?.offerPrice || item.price || 0, // Force singles to use offer price
-            originalPrice: item.pricing?.mrp || item.price || 0,
-            isComboApplied: false
-          });
-        }
-      });
-      
-      // Add combo products with adjusted pricing
-      selectedCombos.forEach(combo => {
-        const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
-        if (allSlotsFilled) {
-          combo.slots.forEach(slot => {
-            if (slot.assigned) {
-              // Use the calculateAdjustedPrice function with the formula:
-              // Adjusted Price = (Product MRP / Total MRP) × Combo Price
-              const adjustedPrice = calculateAdjustedPrice(combo, slot);
-              const originalPrice = Number(slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0);
-              
-              finalItems.push({
-                ...slot.assigned.product,
-                quantity: slot.assigned.qty,
-                price: adjustedPrice,
-                originalPrice: slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0,
-                isComboApplied: true,
-                appliedComboName: combo.name,
-                comboPrice: adjustedPrice,
-                comboSavings: Math.max(0, originalPrice - adjustedPrice)
-              });
-            }
-          });
-        }
-      });
-
       const paymentData = {
-        cartItems: finalItems,
-        paymentMethod: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? 'mix' : 
-                      paymentAmounts.cash > 0 ? 'cash' : 'upi',
-        amount: totalAmount,
-        receivedAmount: paidAmount,
-        mixPaymentDetails: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? {
-          cash: Number(paymentAmounts.cash),
-          upi: Number(paymentAmounts.upi)
-        } : null,
-        customerInfo: {
+        customer: {
           name: name,
-          phone: mobile
+          phone: mobile,
+          email: ''
         },
-        // Don't send combo discount info since finalItems already have correct prices
-        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned)).map(combo => ({
-          comboId: combo._id,
-          comboName: combo.name,
-          offerPrice: combo.offerPrice,
-          discount: 0 // Set to 0 because finalItems already have adjusted prices
+        items: finalItems.map(item => ({
+          product: item._id,
+          productName: item.name,
+          productCode: item.productCode || item.code || 'N/A',
+          quantity: item.quantity,
+          unitPrice: item.price,
+          mrp: item.originalPrice || item.price,
+          totalAmount: item.price * item.quantity,
+          tax: 0,
+          discount: item.isComboApplied ? (item.originalPrice - item.price) : 0,
+          comboAssignment: item.isComboApplied ? {
+            isComboItem: true,
+            comboName: item.appliedComboName
+          } : null
         })),
-        // Add flag to tell backend not to apply additional combo logic
-        combosAlreadyApplied: true,
-        totalSavings: calculateTotalSavings()
+        totals: {
+          subtotal: billData.subtotal + billData.combosTotal,
+          totalTax: 0,
+          totalDiscount: billData.discount,
+          grandTotal: totalAmount,
+          finalAmount: totalAmount
+        },
+        payment: {
+          method: billData.paymentMethod,
+          amount: totalAmount,
+          receivedAmount: paidAmount,
+          changeGiven: billData.change,
+          transactionId: billData.transactionId,
+          status: 'paid',
+          mixPaymentDetails: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? {
+            cash: Number(paymentAmounts.cash),
+            upi: Number(paymentAmounts.upi)
+          } : null
+        },
+        status: 'completed'
       };
 
-      // Generate offline bill - always works
-      console.log('� Generating offline bill with data:', {
-        cartItemsCount: paymentData.cartItems.length,
-        totalAmount: paymentData.amount,
-        paymentMethod: paymentData.paymentMethod
+      console.log('📤 Sending to backend...');
+      const response = await billingService.createBill(paymentData);
+      
+      if (response.success && response.data) {
+        billData.billNumber = response.data.billNumber;
+        billData.transactionId = response.data.transactionId;
+        console.log('✅ Backend save successful:', response.data.billNumber);
+      }
+    } catch (backendError) {
+      console.warn('⚠️ Backend save failed, continuing with offline bill:', backendError);
+      // Continue with offline bill - don't stop the process
+    }
+    
+    // ✅ STOCK REDUCTION - Reduce stock for all items after bill is saved
+    try {
+      console.log('📦 Reducing stock for sold items...');
+      
+      const stockUpdatePromises = finalItems.map(async (item) => {
+        // Skip custom products (manually added items)
+        if (item._id && !item._id.toString().startsWith('custom_')) {
+          try {
+            // Update product stock
+            await productService.updateStock(item._id, item.quantity, 'subtract');
+            console.log(`✅ Stock reduced for ${item.name}: -${item.quantity}`);
+            
+            // If product has parent (variant case), update parent stock too
+            const product = products.find(p => p._id === item._id);
+            if (product?.parentProduct) {
+              await productService.updateStock(product.parentProduct, item.quantity, 'subtract');
+              console.log(`✅ Parent stock reduced for ${item.name}: -${item.quantity}`);
+            }
+          } catch (stockError) {
+            console.warn(`⚠️ Failed to update stock for ${item.name}:`, stockError);
+          }
+        }
       });
       
-      // Always process successfully in offline mode
-      const paymentProcessed = true;
-      const result = {
-        success: true,
-        billNumber: `OFFLINE${Date.now()}`,
-        transactionId: `TXN${Date.now()}`,
-        message: 'Offline bill generated successfully'
-      };
+      // Wait for all stock updates to complete
+      await Promise.all(stockUpdatePromises);
       
-      console.log('✅ Offline bill generated successfully');
+      // Reload products to get updated stock levels
+      const updatedProducts = await productService.getProducts();
+      setProducts(updatedProducts.data || updatedProducts || []);
       
-      // Separate items for better bill display
-      const singlesItems = finalItems.filter(item => !item.isComboApplied);
-      const comboItems = finalItems.filter(item => item.isComboApplied);
-      
-
-
-      // Generate bill regardless of payment service response
-      const billData = {
-        billNumber: (result?.billNumber) || `B${Date.now()}`,
-        transactionId: result?.transactionId || `T${Date.now()}`,
-        date: new Date(),
-        customer: customerInfo,
-        items: finalItems, // This includes both singles and combo items with correct prices
-        singlesItems: singlesItems, // Only single items
-        comboItems: comboItems, // Only combo items with adjusted prices
-        subtotal: calculateSinglesSubtotal(),
-        combosTotal: calculateCombosSubtotal(),
-        total: totalAmount,
-        discount: calculateTotalSavings(),
-        paymentMethod: paymentData.paymentMethod,
-        receivedAmount: paidAmount,
-        change: Math.max(0, paidAmount - totalAmount),
-        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
-      };
-      
-      // Always show offline success message
-      toast.success('💾 Bill generated successfully! ');
-      
-      // Set bill data for receipt
-      setLastBill(billData);
-      
-      // Ask user if they want to print
-      const printChoice = window.confirm('💾 Bill generated successfully!\n\n🖨 Click OK to PRINT the bill\n📄 Click Cancel to just save (no print)');
-      
-      if (printChoice) {
-        // Add a small delay to ensure state is updated
-        setTimeout(() => {
-          printReceiptWithAutoPrint(billData);
-          toast.success('Bill saved and sent to printer!');
-        }, 100);
-      } else {
-        toast.success('Bill saved successfully! (No print)');
-      }
-      
-      // Clear bill after a short delay
-      setTimeout(() => {
-        clearBill();
-        setLastBill(null);
-      }, 1000);
-    } catch (error) {
-      console.error('Payment error:', error);
-      toast.error('Payment processing failed. Please try again.');
-    } finally {
-      setProcessing(false);
+      console.log('✅ Stock updated successfully for all items');
+    } catch (stockError) {
+      console.error('⚠️ Stock update failed:', stockError);
+      toast.warning('Bill saved but stock update failed. Please check inventory manually.');
     }
-  };
+    
+    // Show success message
+    toast.success('💾 Bill generated successfully!');
+    
+    // Set bill data for receipt
+    setLastBill(billData);
+    
+    // Ask user about printing
+    const printChoice = window.confirm('💾 Bill generated!\n\n🖨 Click OK to PRINT\n📄 Click Cancel to skip print');
+    
+    if (printChoice) {
+      console.log('🖨 User chose to print');
+      // Small delay to ensure state is updated
+      setTimeout(() => {
+        printReceiptWithAutoPrint(billData);
+        toast.success('Bill sent to printer!');
+      }, 200);
+    } else {
+      console.log('📄 User skipped printing');
+      toast.info('Bill saved (no print)');
+    }
+    
+    // Clear bill after delay
+    setTimeout(() => {
+      clearBill();
+      setLastBill(null);
+    }, 1000);
+    
+  } catch (error) {
+    console.error('❌ Error in finalizeAndPrint:', error);
+    toast.error('Failed to generate bill: ' + error.message);
+  } finally {
+    setProcessing(false);
+  }
+};
 
   // Print receipt with provided data
   const printReceiptWithData = (billData) => {
@@ -1122,78 +1166,169 @@ const POSBillingPage = () => {
 
   // Generate receipt HTML
 // Generate receipt HTML
+// Complete generateReceiptHTML function - Copy this ENTIRE function into your React component
+
 const generateReceiptHTML = (bill, autoPrint = false) => {
   if (!bill) {
     console.error('No bill data provided to generateReceiptHTML');
     return '';
   }
   
- return `
+  const fmt = (val) => `₹${parseFloat(val || 0).toFixed(2)}`;
+  
+  // Calculate GST for individual items based on price threshold
+  const calculateItemGST = (price, quantity) => {
+    if (price > 2500) {
+      // 12% GST for items above 2500
+      const gstRate = 0.12;
+      const baseAmount = (price * quantity) / (1 + gstRate);
+      const totalGST = (price * quantity) - baseAmount;
+      const cgst = totalGST / 2;
+      const sgst = totalGST / 2;
+      
+      return {
+        gstRate: 12,
+        baseAmount: parseFloat(baseAmount.toFixed(2)),
+        cgst: parseFloat(cgst.toFixed(2)),
+        sgst: parseFloat(sgst.toFixed(2)),
+        totalGST: parseFloat(totalGST.toFixed(2))
+      };
+    } else {
+      // 5% GST for items 2500 and below
+      const gstRate = 0.05;
+      const baseAmount = (price * quantity) / (1 + gstRate);
+      const totalGST = (price * quantity) - baseAmount;
+      const cgst = totalGST / 2;
+      const sgst = totalGST / 2;
+      
+      return {
+        gstRate: 5,
+        baseAmount: parseFloat(baseAmount.toFixed(2)),
+        cgst: parseFloat(cgst.toFixed(2)),
+        sgst: parseFloat(sgst.toFixed(2)),
+        totalGST: parseFloat(totalGST.toFixed(2))
+      };
+    }
+  };
+  
+  // Calculate overall GST breakdown for all items
+  const calculateOverallGST = (items) => {
+    let taxable12 = 0;
+    let cgst12 = 0;
+    let sgst12 = 0;
+    
+    let taxable5 = 0;
+    let cgst5 = 0;
+    let sgst5 = 0;
+    
+    items.forEach(item => {
+      const price = item.pricing?.offerPrice || 0;
+      const gst = calculateItemGST(price, item.quantity || 1);
+      
+      if (gst.gstRate === 12) {
+        taxable12 += gst.baseAmount;
+        cgst12 += gst.cgst;
+        sgst12 += gst.sgst;
+      } else {
+        taxable5 += gst.baseAmount;
+        cgst5 += gst.cgst;
+        sgst5 += gst.sgst;
+      }
+    });
+    
+    return {
+      gst12: {
+        taxable: parseFloat(taxable12.toFixed(2)),
+        cgst: parseFloat(cgst12.toFixed(2)),
+        sgst: parseFloat(sgst12.toFixed(2)),
+        total: parseFloat((cgst12 + sgst12).toFixed(2))
+      },
+      gst5: {
+        taxable: parseFloat(taxable5.toFixed(2)),
+        cgst: parseFloat(cgst5.toFixed(2)),
+        sgst: parseFloat(sgst5.toFixed(2)),
+        total: parseFloat((cgst5 + sgst5).toFixed(2))
+      }
+    };
+  };
+  
+  return `
     <!DOCTYPE html>
     <html>
       <head>
         <title>Receipt - ${bill.billNumber}</title>
         <style>
-          /* Thermal Printer 3-inch (80mm) Paper */
           @page {
-            size: 80mm auto;
+            width: 81mm;
+            height: auto;
             margin: 2mm;
           }
           body { 
             font-family: Arial, sans-serif; 
-            font-size: 13px; 
-            font-weight: 500;
-            line-height: 1.4;
+            font-size: 11.5px; 
+            font-weight: bold;
+            line-height: 1.2;
             margin: 0;
-            padding: 4mm 6mm;
+            padding: 3mm 5mm;
             width: 68mm;
             color: #000;
             background: #fff;
           }
           .center { text-align: center; }
-          .left { text-align: left; }
-          .right { text-align: right; }
           .bold { font-weight: bold; }
           .large { font-size: 18px; font-weight: bold; }
           .medium { font-size: 15px; }
           .small { font-size: 12px; }
           .divider { 
             border-top: 1px dashed #000; 
-            margin: 3mm 0; 
+            margin: 2mm 0; 
             width: 100%;
           }
           .solid-divider {
             border-top: 1px solid #000; 
-            margin: 2mm 0; 
+            margin: 1.5mm 0; 
             width: 100%;
           }
           .flex-between { 
             display: flex; 
             justify-content: space-between;
             width: 100%;
-            margin: 1mm 0;
+            margin: 0.5mm 0;
           }
           .table-header {
             display: flex;
             justify-content: space-between;
             font-weight: bold;
-            font-size: 11px;
-            padding: 2mm 0;
+            font-size: 9.5px;
+            padding: 1.5mm 0;
             border-top: 1px solid #000;
             border-bottom: 1px solid #000;
-            margin: 2mm 0;
+            margin: 1.5mm 0;
           }
           .item-row {
             display: flex;
             justify-content: space-between;
-            font-size: 12px;
-            padding: 1mm 0;
-            line-height: 1.3;
+            font-size: 11px;
+            padding: 0.5mm 0;
+            line-height: 1.2;
+          }
+          .gst-badge {
+            font-size: 8px;
+            color: white;
+            padding: 0.5mm 1mm;
+            border-radius: 2px;
+            margin-left: 1mm;
+          }
+          .gst-12 {
+            background: #dc3545;
+          }
+          .gst-5 {
+            background: #28a745;
           }
           @media print {
             body { 
               margin: 0;
-              padding: 4mm 6mm;
+              padding: 3mm 5mm;
               width: 68mm;
             }
             .no-print { display: none; }
@@ -1219,9 +1354,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         
         <div class="center bold medium">INVOICE</div>
         
-        <div class="divider"></div>
-        
-        <div style="font-size: 12px;">
+        <div style="font-size: 12px; margin-top: 2mm;">
           <div class="flex-between">
             <span class="bold">Invoice:</span>
             <span class="bold">${bill.billNumber}</span>
@@ -1236,8 +1369,8 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           </div>
         </div>
         
-        ${(bill.customer.name || bill.customer.phone) ? `
-        <div style="margin-top: 3mm; font-size: 12px;">
+        ${(bill.customer && (bill.customer.name || bill.customer.phone)) ? `
+        <div style="margin-top: 2mm; font-size: 12px;">
           <div class="flex-between">
             <span class="bold">Customer:</span>
             <span class="bold">${bill.customer.name || 'N/A'}</span>
@@ -1252,10 +1385,10 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         <div class="divider"></div>
         
         ${bill.combos && bill.combos.length > 0 ? `
-        <div style="font-size: 11px; margin-bottom: 3mm;">
+        <div style="font-size: 11px; margin-bottom: 2mm;">
           <div class="bold">COMBO OFFERS APPLIED:</div>
           ${(bill.combos || []).map(combo => `
-            <div style="margin: 2mm 0; padding: 2mm; border: 1px dashed #666;">
+            <div style="margin: 1.5mm 0; padding: 1.5mm; border: 1px dashed #666;">
               <div class="bold">${combo.name}</div>
               <div style="font-size: 10px;">Total: ₹${combo.offerPrice}</div>
             </div>
@@ -1264,55 +1397,65 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         <div class="divider"></div>
         ` : ''}
         
-        <!-- Table Header -->
         <div class="table-header">
-          <span style="width: 8mm;">SL</span>
-          <span style="width: 22mm; text-align: left;">NAME</span>
-          <span style="width: 10mm; text-align: right;">MRP</span>
-          <span style="width: 7mm; text-align: right;">QTY</span>
-          <span style="width: 13mm; text-align: right;">AMOUNT</span>
+          <span style="width: 20mm;">NAME</span>
+          <span style="width: 9mm;">MRP</span>
+          <span style="width: 6mm;">QTY</span>
+          <span style="width: 9mm;">OFFER</span>
+          <span style="width: 11mm;">AMT</span>
         </div>
         
-        <!-- Single Items -->
         ${bill.singlesItems && bill.singlesItems.length > 0 ? 
-          (bill.singlesItems || []).map((item, index) => `
+          (bill.singlesItems || []).map((item, index) => {
+            const mrp = item.pricing?.mrp || 0;
+            const offerPrice = item.pricing?.offerPrice || 0;
+            const gstRate = offerPrice > 2500 ? 12 : 5;
+            const badgeClass = gstRate === 12 ? 'gst-12' : 'gst-5';
+            return `
           <div class="item-row">
-            <span style="width: 8mm; font-weight: bold;">${index + 1}.</span>
-            <span style="width: 22mm; text-align: left; word-wrap: break-word; line-height: 1.2;">${item.name}</span>
-            <span style="width: 10mm; text-align: right; font-weight: bold;">${fmt(item.pricing?.offerPrice || item.price)}</span>
-            <span style="width: 7mm; text-align: right;">${item.quantity}</span>
-            <span style="width: 13mm; text-align: right; font-weight: bold;">${fmt((item.pricing?.offerPrice || item.price) * item.quantity)}</span>
+            <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
+              ${item.name}
+             
+            </span>
+            <span style="width: 9mm;">${fmt(mrp)}</span>
+            <span style="width: 6mm; text-align: right;">${item.quantity}</span>
+            <span style="width: 9mm; font-weight: bold;">${fmt(offerPrice)}</span>
+            <span style="width: 11mm; font-weight: bold;">${fmt(offerPrice * item.quantity)}</span>
           </div>
-        `).join('') : ''}
+        `;}).join('') : ''}
 
-        <!-- Combo Items -->
         ${bill.comboItems && bill.comboItems.length > 0 ? 
           (bill.comboItems || []).map((item, index) => {
             const slNo = (bill.singlesItems?.length || 0) + index + 1;
+            const offerPrice = item.pricing?.offerPrice || 0;
+            const originalMRP = item.pricing?.mrp || offerPrice;
+            const gstRate = offerPrice > 2500 ? 12 : 5;
+            const badgeClass = gstRate === 12 ? 'gst-12' : 'gst-5';
+            
             return `
           <div class="item-row">
-            <span style="width: 8mm; font-weight: bold;">${slNo}.</span>
-            <span style="width: 22mm; text-align: left; word-wrap: break-word; line-height: 1.2;">${item.name}</span>
-            <span style="width: 10mm; text-align: right; font-weight: bold;">${fmt(item.price)}</span>
-            <span style="width: 7mm; text-align: right;">${item.quantity}</span>
-            <span style="width: 13mm; text-align: right; font-weight: bold;">${fmt(item.price * item.quantity)}</span>
+            <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
+              ${item.name}
+             
+            </span>
+            <span style="width: 9mm;">${fmt(originalMRP)}</span>
+            <span style="width: 6mm; text-align: right;">${item.quantity}</span>
+            <span style="width: 9mm; font-weight: bold;">${fmt(offerPrice)}</span>
+            <span style="width: 11mm; font-weight: bold;">${fmt(offerPrice * item.quantity)}</span>
           </div>
-          <div style="font-size: 10px; padding-left: 8mm; color: #333;">
-            ★ ${item.appliedComboName}
-          </div>
+         
         `;}).join('') : ''}
         
         <div class="solid-divider"></div>
         
-        <!-- Totals Section -->
-        <div style="font-size: 12px; margin-top: 3mm;">
+        <div style="font-size: 12px; margin-top: 2mm;">
           ${(() => {
             const allItems = [
               ...(bill.singlesItems || []),
               ...(bill.comboItems || [])
             ];
             const totalItems = allItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
-            const gstBreakdown = calculateGSTBreakdown(bill.total, allItems);
+            const gstBreakdown = calculateOverallGST(allItems);
             
             return `
               <div class="flex-between">
@@ -1323,7 +1466,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span>Item Qty:</span>
                 <span class="bold">${totalItems}</span>
               </div>
-              <div class="solid-divider" style="margin: 3mm 0;"></div>
+              <div class="solid-divider" style="margin: 2mm 0;"></div>
               <div class="flex-between">
                 <span class="bold">Total:</span>
                 <span class="bold">${fmt(bill.total)}</span>
@@ -1348,20 +1491,33 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
               </div>
               <div class="divider"></div>
               <div class="center bold small">TAX SUMMARY</div>
-              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 2mm;">
-                <span style="width: 13mm; font-weight: bold;">Tax %</span>
-                <span style="width: 16mm; text-align: right;">Taxable Amt</span>
-                <span style="width: 11mm; text-align: right; font-weight: bold;">SGST</span>
-                <span style="width: 11mm; text-align: right;">CGST</span>
-                <span style="width: 13mm; text-align: right; font-weight: bold;">Total GST</span>
-              </div>
-              <div class="solid-divider" style="margin: 1mm 0;"></div>
-              <div style="display: flex; justify-content: space-between; font-size: 11px;">
-                <span style="width: 13mm; font-weight: bold;">${gstBreakdown.cgstRate * 2}%</span>
-                <span style="width: 16mm; text-align: right;">${fmt(gstBreakdown.baseAmount)}</span>
-                <span style="width: 11mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst)}</span>
-                <span style="width: 11mm; text-align: right;">${fmt(gstBreakdown.cgst)}</span>
-                <span style="width: 13mm; text-align: right; font-weight: bold;">${fmt(gstBreakdown.sgst + gstBreakdown.cgst)}</span>
+              <div style="font-size: 10px; margin-top: 1.5mm;">
+                <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 1mm;">
+                  <span style="width: 12mm;">Tax %</span>
+                  <span style="width: 14mm;">Taxable</span>
+                  <span style="width: 10mm;">SGST</span>
+                  <span style="width: 10mm;">CGST</span>
+                  <span style="width: 12mm;">GST</span>
+                </div>
+                <div class="solid-divider" style="margin: 1mm 0;"></div>
+                ${gstBreakdown.gst12.total > 0 ? `
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="width: 12mm; font-weight: bold;">12%</span>
+                    <span style="width: 14mm;">${fmt(gstBreakdown.gst12.taxable)}</span>
+                    <span style="width: 10mm; font-weight: bold;">${fmt(gstBreakdown.gst12.sgst)}</span>
+                    <span style="width: 10mm;">${fmt(gstBreakdown.gst12.cgst)}</span>
+                    <span style="width: 12mm; font-weight: bold;">${fmt(gstBreakdown.gst12.total)}</span>
+                  </div>
+                ` : ''}
+                ${gstBreakdown.gst5.total > 0 ? `
+                  <div style="display: flex; justify-content: space-between; ${gstBreakdown.gst12.total > 0 ? 'margin-top: 1mm;' : ''}">
+                    <span style="width: 12mm; font-weight: bold;">5%</span>
+                    <span style="width: 14mm;">${fmt(gstBreakdown.gst5.taxable)}</span>
+                    <span style="width: 10mm; font-weight: bold;">${fmt(gstBreakdown.gst5.sgst)}</span>
+                    <span style="width: 10mm;">${fmt(gstBreakdown.gst5.cgst)}</span>
+                    <span style="width: 12mm; font-weight: bold;">${fmt(gstBreakdown.gst5.total)}</span>
+                  </div>
+                ` : ''}
               </div>
             `;
           })()}
@@ -1372,7 +1528,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         <div style="font-size: 12px;">
           <div class="flex-between">
             <span class="bold">Payment:</span>
-            <span>${bill.paymentMethod.toUpperCase()}</span>
+            <span>${(bill.paymentMethod || 'cash').toUpperCase()}</span>
           </div>
         </div>
         
@@ -1380,10 +1536,11 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         
         <div class="center">
           <div class="bold small">Terms & Conditions</div>
-          <div style="font-size: 11px; margin-top: 2mm;">
+          <div style="font-size: 11px; margin-top: 1.5mm;">
             <div>No Exchange, No Return, No Guarantee.</div>
             <div>Please verify items before leaving.</div>
             <div>Working Hours: 8:00 AM – 9:00 PM</div>
+            <div style="margin-top: 1mm; font-style: italic;">*GST: 5% (≤₹2500) | 12% (>₹2500)</div>
           </div>
         </div>
         
@@ -1426,6 +1583,8 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
     </html>
   `;
 };
+
+
 
   // Print receipt - matches reference formatting (legacy function for preview)
   const printReceipt = () => {
@@ -2117,7 +2276,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                         // If this cart item is assigned to a combo, reduce quantity by 1
                         const quantityForSingles = assignedCartItemIds.has(item.cartItemId) 
                           ? Math.max(0, item.quantity - 1)  // Reduce by 1 for combo assignment
-                          : item.quantity; // All quantity counts as singles
+                          : item.quantity; 
                         
                         if (quantityForSingles > 0) {
                           previewItems.push({
