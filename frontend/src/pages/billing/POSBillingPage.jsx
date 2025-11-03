@@ -609,30 +609,36 @@ const POSBillingPage = () => {
 
   // Calculate adjusted price for a product in a combo using the formula:
   // Adjusted Price = (Product MRP / Total MRP) × Combo Price
-  const calculateAdjustedPrice = (combo, slot) => {
-    if (!combo || !slot || !slot.assigned) return 0;
-    
-    const allSlotsFilled = combo.slots?.every(s => s.assigned) || false;
-    if (!allSlotsFilled) return Number(slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0);
-    
-    // Calculate total MRP of all assigned products
-    const totalMRP = combo.slots.reduce((sum, s) => {
-      if (s.assigned) {
-        return sum + Number(s.assigned.product.pricing?.discountedPrice || s.assigned.product.pricing?.offerPrice || 0) * (s.assigned.qty || 1);
-      }
-      return sum;
-    }, 0);
-    
-    if (totalMRP === 0) return 0;
-    
-    // Apply the formula: (Product MRP / Total MRP) × Combo Price
-    const productMRP = Number(slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0) * (slot.assigned.qty || 1);
-    const comboPrice = Number(combo.offerPrice || 0);
-    const adjustedPrice = (productMRP / totalMRP) * comboPrice;
-    
-    // Round to 2 decimals (or nearest ₹1 for simplicity)
-    return Math.round(adjustedPrice);
-  };
+const calculateAdjustedPrice = (combo, slot) => {
+  if (!combo || !slot || !slot.assigned) return 0;
+  
+  const allSlotsFilled = combo.slots?.every(s => s.assigned) || false;
+  if (!allSlotsFilled) {
+    return Number(slot.assigned.product.pricing?.offerPrice || 0);
+  }
+  
+  // Calculate total MRP of all assigned products
+  const totalMRP = combo.slots.reduce((sum, s) => {
+    if (s.assigned) {
+      const price = Number(s.assigned.product.pricing?.offerPrice || 0);
+      const qty = s.assigned.qty || 1;
+      return sum + (price * qty);
+    }
+    return sum;
+  }, 0);
+   if (totalMRP === 0) return 0;
+  
+  // Calculate: (Product Price × Qty / Total MRP) × Combo Offer Price
+  const productPrice = Number(slot.assigned.product.pricing?.offerPrice || 0);
+  const productQty = slot.assigned.qty || 1;
+  const productMRP = productPrice * productQty;
+  const comboPrice = Number(combo.offerPrice || 0);
+  
+  const adjustedPrice = (productMRP / totalMRP) * comboPrice;
+  
+  // Return per-unit adjusted price
+  return Math.round(adjustedPrice / productQty);
+};
 
   const calculateTotalSavings = () => {
     return selectedCombos.reduce((totalSavings, combo) => {
@@ -1222,7 +1228,8 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
     let sgst5 = 0;
     
     items.forEach(item => {
-      const price = item.pricing?.offerPrice || 0;
+      // CRITICAL FIX: Use price field which contains adjusted price for combos
+      const price = item.price || item.pricing?.offerPrice || 0;
       const gst = calculateItemGST(price, item.quantity || 1);
       
       if (gst.gstRate === 12) {
@@ -1250,6 +1257,24 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         total: parseFloat((cgst5 + sgst5).toFixed(2))
       }
     };
+  };
+  
+  // Calculate actual discount: Total MRP - Total Offer Price (using price field for combo items)
+  const calculateActualDiscount = (items) => {
+    let totalMRP = 0;
+    let totalOffer = 0;
+    
+    items.forEach(item => {
+      const mrp = item.pricing?.mrp || item.originalPrice || 0;
+      // CRITICAL FIX: Use price field which contains adjusted price for combos
+      const offerPrice = item.price || item.pricing?.offerPrice || 0;
+      const qty = item.quantity || 1;
+      
+      totalMRP += mrp * qty;
+      totalOffer += offerPrice * qty;
+    });
+    
+    return parseFloat((totalMRP - totalOffer).toFixed(2));
   };
   
   return `
@@ -1311,19 +1336,6 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             font-size: 11px;
             padding: 0.5mm 0;
             line-height: 1.2;
-          }
-          .gst-badge {
-            font-size: 8px;
-            color: white;
-            padding: 0.5mm 1mm;
-            border-radius: 2px;
-            margin-left: 1mm;
-          }
-          .gst-12 {
-            background: #dc3545;
-          }
-          .gst-5 {
-            background: #28a745;
           }
           @media print {
             body { 
@@ -1407,15 +1419,12 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         
         ${bill.singlesItems && bill.singlesItems.length > 0 ? 
           (bill.singlesItems || []).map((item, index) => {
-            const mrp = item.pricing?.mrp || 0;
-            const offerPrice = item.pricing?.offerPrice || 0;
-            const gstRate = offerPrice > 2500 ? 12 : 5;
-            const badgeClass = gstRate === 12 ? 'gst-12' : 'gst-5';
+            const mrp = item.pricing?.mrp || item.originalPrice || 0;
+            const offerPrice = item.price || item.pricing?.offerPrice || 0;
             return `
           <div class="item-row">
             <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
               ${item.name}
-             
             </span>
             <span style="width: 9mm;">${fmt(mrp)}</span>
             <span style="width: 6mm; text-align: right;">${item.quantity}</span>
@@ -1426,24 +1435,20 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
 
         ${bill.comboItems && bill.comboItems.length > 0 ? 
           (bill.comboItems || []).map((item, index) => {
-            const slNo = (bill.singlesItems?.length || 0) + index + 1;
-            const offerPrice = item.pricing?.offerPrice || 0;
-            const originalMRP = item.pricing?.mrp || offerPrice;
-            const gstRate = offerPrice > 2500 ? 12 : 5;
-            const badgeClass = gstRate === 12 ? 'gst-12' : 'gst-5';
+            // CRITICAL FIX: Use price field which contains the adjusted price
+            const adjustedPrice = item.price || item.comboPrice || item.adjustedPrice || 0;
+            const originalMRP = item.pricing?.mrp || item.originalPrice || 0;
             
             return `
           <div class="item-row">
             <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
               ${item.name}
-             
             </span>
             <span style="width: 9mm;">${fmt(originalMRP)}</span>
             <span style="width: 6mm; text-align: right;">${item.quantity}</span>
-            <span style="width: 9mm; font-weight: bold;">${fmt(offerPrice)}</span>
-            <span style="width: 11mm; font-weight: bold;">${fmt(offerPrice * item.quantity)}</span>
+            <span style="width: 9mm; font-weight: bold;">${fmt(adjustedPrice)}</span>
+            <span style="width: 11mm; font-weight: bold;">${fmt(adjustedPrice * item.quantity)}</span>
           </div>
-         
         `;}).join('') : ''}
         
         <div class="solid-divider"></div>
@@ -1457,6 +1462,16 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             const totalItems = allItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
             const gstBreakdown = calculateOverallGST(allItems);
             
+            // Calculate actual discount
+            const actualDiscount = calculateActualDiscount(allItems);
+            
+            // Calculate total MRP
+            const totalMRP = allItems.reduce((sum, item) => {
+              const mrp = item.pricing?.mrp || item.originalPrice || 0;
+              const qty = item.quantity || 1;
+              return sum + (mrp * qty);
+            }, 0);
+            
             return `
               <div class="flex-between">
                 <span>Total Items:</span>
@@ -1468,12 +1483,12 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
               </div>
               <div class="solid-divider" style="margin: 2mm 0;"></div>
               <div class="flex-between">
-                <span class="bold">Total:</span>
-                <span class="bold">${fmt(bill.total)}</span>
+                <span class="bold">Total MRP:</span>
+                <span class="bold">${fmt(totalMRP)}</span>
               </div>
-              <div class="flex-between">
+              <div class="flex-between" style="color: #28a745;">
                 <span>Discount:</span>
-                <span class="bold">${fmt(bill.discount || 0)}</span>
+                <span class="bold">- ${fmt(actualDiscount)}</span>
               </div>
               <div class="solid-divider"></div>
               <div class="flex-between bold" style="font-size: 15px;">
@@ -1583,9 +1598,6 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
     </html>
   `;
 };
-
-
-
   // Print receipt - matches reference formatting (legacy function for preview)
   const printReceipt = () => {
     if (!lastBill) return;
