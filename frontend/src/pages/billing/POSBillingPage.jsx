@@ -1359,7 +1359,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           <div class="small">1st Parallel Road, Durgigudi,</div>
           <div class="small">Shimoga – 577201</div>
           <div class="small">Mobile: 70262 09627</div>
-          <div class="small">GSTIN: __________</div>
+          <div class="small">GSTIN: 29GJMPP54227F1Z0</div>
         </div>
         
         <div class="divider"></div>
@@ -1486,7 +1486,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span class="bold">Total MRP:</span>
                 <span class="bold">${fmt(totalMRP)}</span>
               </div>
-              <div class="flex-between" style="color: #28a745;">
+              <div class="flex-between" style="color: #000000;">
                 <span>Discount:</span>
                 <span class="bold">- ${fmt(actualDiscount)}</span>
               </div>

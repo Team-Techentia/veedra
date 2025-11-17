@@ -105,241 +105,212 @@ const BillHistoryPage = () => {
       return;
     }
 
-    const receiptHTML = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Receipt - ${bill.billNumber}</title>
-          <style>
-            /* Thermal Printer 3-inch (80mm) Paper */
-            @page {
-              size: 80mm auto;
-              margin: 2mm;
-            }
-            body { 
-              font-family: 'Thermal Sans Mono', 'OCR-B', 'Courier New', 'Lucida Console', monospace; 
-              font-size: 10px; 
-              line-height: 1.3;
-              margin: 0;
-              padding: 2mm;
-              width: 76mm; /* 3 inch - margins */
-              color: #000;
-            }
-            .header { 
-              text-align: center; 
-              border-bottom: 1px dashed #000; 
-              padding-bottom: 3mm; 
-              margin-bottom: 3mm;
-            }
-            .store-name { font-size: 12px; font-weight: bold; margin-bottom: 1mm; }
-            .store-info { font-size: 8px; }
-            .bill-info { 
-              margin: 3mm 0;
-              padding: 2mm 0;
-              border-bottom: 1px dashed #000;
-            }
-            .bill-info div {
-              margin-bottom: 1mm;
-            }
-            .customer-info {
-              padding: 2mm;
-              margin: 2mm 0;
-              border: 1px solid #000;
-              font-size: 8px;
-            }
-            .items-section {
-              margin: 3mm 0;
-            }
-            .item-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 1mm;
-              border-bottom: 1px dotted #ccc;
-              padding-bottom: 1mm;
-            }
-            .item-name {
-              flex: 1;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-              max-width: 45mm;
-            }
-            .item-qty-price {
-              text-align: right;
-              min-width: 30mm;
-              font-size: 9px;
-            }
-            .totals { 
-              margin-top: 3mm; 
-              padding-top: 2mm; 
-              border-top: 1px dashed #000;
-            }
-            .total-row { 
-              display: flex; 
-              justify-content: space-between; 
-              padding: 1mm 0;
-            }
-            .final-total { 
-              font-weight: bold; 
-              font-size: 11px; 
-              border-top: 1px solid #000;
-              padding-top: 2mm;
-              margin-top: 2mm;
-            }
-            .footer { 
-              text-align: center; 
-              margin-top: 5mm; 
-              padding-top: 3mm;
-              border-top: 1px dashed #000;
-              font-size: 8px;
-            }
-            .payment-method {
-              text-align: center;
-              padding: 2mm;
-              margin: 2mm 0;
-              border: 1px solid #000;
-              font-weight: bold;
-              font-size: 9px;
-            }
-            .divider { 
-              border-top: 1px dashed #000; 
-              margin: 3mm 0; 
-              width: 100%;
-            }
-            @media print {
-              body { 
-                margin: 0;
-                padding: 2mm;
-                width: 76mm;
-              }
-              * { 
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="store-name">VEEDRA THE BRAND</div>
-            <div class="store-info">Wholesalers in Western Wear,</div>
-            <div class="store-info">Ethnic Wear & Indo-Western Wear</div>
-            <div class="store-info">1st Parallel Road, Durgigudi,</div>
-            <div class="store-info">Shimoga – 577201</div>
-            <div class="store-info">📞 Mobile: 70262 09627</div>
-            <div class="store-info">GSTIN: __________</div>
-          </div>
+const receiptHTML = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Receipt - ${bill.billNumber}</title>
+    <style>
+      @page {
+        size: 80mm auto;
+        margin: 2mm;
+      }
 
-          <div style="text-align: center; font-weight: bold; margin: 3mm 0;">INVOICE</div>
+      body {
+        font-family:  Arial, sans-serif;
+        font-size: 11.5px;
+        line-height: 1.3;
+        margin: 0;
+        padding: 2mm;
+        width: 76mm;
+        font-weight: bold;
+        color: #000;
+      }
 
-          <div class="bill-info">
-            <div><strong>Bill No:</strong> ${bill.billNumber}</div>
-            <div><strong>Date:</strong> ${new Date(bill.createdAt).toLocaleDateString()}</div>
-            <div><strong>Time:</strong> ${new Date(bill.createdAt).toLocaleTimeString()}</div>
-            <div><strong>Cashier:</strong> ${bill.staffName}</div>
-            ${bill.transactionId ? `<div><strong>TxnID:</strong> ${bill.transactionId}</div>` : ''}
-          </div>
+      .header {
+        text-align: center;
+        border-bottom: 1px dashed #000;
+        padding-bottom: 3mm;
+        margin-bottom: 3mm;
+      }
 
-          ${(bill.customerName !== 'Walk-in Customer' || bill.customerPhone !== 'N/A') ? `
-            <div class="customer-info">
-              <strong>Customer:</strong> ${bill.customerName}<br>
-              <strong>Mobile:</strong> ${bill.customerPhone}
-            </div>
-          ` : ''}
+      .store-name { font-size: 12px; margin-bottom: 1mm; }
+      .store-info { font-size: 9px; }
 
-          <div class="divider"></div>
-          
-          <!-- Items Table Header -->
-          <div style="font-size: 8px; font-weight: bold; margin-bottom: 2px;">
-            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #000; padding-bottom: 1px;">
-              <span style="width: 8mm;">SL</span>
-              <span style="width: 32mm; text-align: left;">ITEM</span>
-              <span style="width: 12mm; text-align: right;">QTY</span>
-              <span style="width: 12mm; text-align: right;">RATE</span>
-              <span style="width: 12mm; text-align: right;">TOTAL</span>
-            </div>
-          </div>
-          
-          <div class="items-section">
-            ${bill.items.map((item, index) => `
-              <div style="font-size: 8px; margin-bottom: 1px;">
-                <div style="display: flex; justify-content: space-between;">
-                  <span style="width: 8mm;">${index + 1}</span>
-                  <span style="width: 32mm; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${item.name}</span>
-                  <span style="width: 12mm; text-align: right;">${item.quantity}</span>
-                  <span style="width: 12mm; text-align: right;">₹${item.price.toLocaleString()}</span>
-                  <span style="width: 12mm; text-align: right; font-weight: bold;">₹${item.total.toLocaleString()}</span>
-                </div>
-              </div>
-            `).join('')}
-          </div>
+      .bill-info {
+        margin: 3mm 0;
+        padding: 2mm 0;
+        border-bottom: 1px dashed #000;
+      }
 
-          <div class="totals">
-            ${(() => {
-              const gstData = calculateGSTBreakdown(bill.items || []);
-              return `
-                <div class="total-row">
-                  <span>Taxable Amount:</span>
-                  <span>₹${gstData.totalWithoutGST.toLocaleString()}</span>
-                </div>
-                ${gstData.sgst5 > 0 ? `
-                  <div class="total-row">
-                    <span>SGST (2.5%):</span>
-                    <span>₹${gstData.sgst5.toLocaleString()}</span>
-                  </div>
-                  <div class="total-row">
-                    <span>CGST (2.5%):</span>
-                    <span>₹${gstData.cgst5.toLocaleString()}</span>
-                  </div>
-                ` : ''}
-                ${gstData.sgst12 > 0 ? `
-                  <div class="total-row">
-                    <span>SGST (6%):</span>
-                    <span>₹${gstData.sgst12.toLocaleString()}</span>
-                  </div>
-                  <div class="total-row">
-                    <span>CGST (6%):</span>
-                    <span>₹${gstData.cgst12.toLocaleString()}</span>
-                  </div>
-                ` : ''}
-                <div class="divider"></div>
-              `;
-            })()}
+      .bill-info div { margin-bottom: 1mm; }
 
-            <div class="total-row final-total">
-              <span>GRAND TOTAL:</span>
-              <span>₹${bill.total.toLocaleString()}</span>
-            </div>
-          </div>
+      .customer-info {
+        padding: 2mm;
+        margin: 2mm 0;
+        border: 1px solid #000;
+        font-size: 10px;
+      }
 
-          <div class="divider"></div>
-          
-          <div>
-            <div>Payment: ${bill.paymentMethod.toUpperCase()}</div>
-            <div>Paid: ₹${bill.receivedAmount ? bill.receivedAmount.toLocaleString() : bill.total.toLocaleString()}</div>
-            <div>Change: ₹${bill.change ? bill.change.toLocaleString() : '0'}</div>
-          </div>
-          
-          <div class="divider"></div>
-          
-          <div style="text-align: center; font-weight: bold; font-size: 9px; margin: 2mm 0;">Terms & Conditions</div>
-          <div style="text-align: center; font-size: 8px;">
-            <div>No Exchange, No Return, No Guarantee.</div>
-            <div>Please verify items before leaving the store.</div>
-            <div>Working Hours: 8:00 AM – 9:00 PM</div>
-          </div>
-          
-          <div class="divider"></div>
-          
-          <div class="footer">
-            <div style="font-weight: bold;">Thank You for Shopping at</div>
-            <div style="font-weight: bold;">VEEDRA THE BRAND</div>
-            <div>Best Prices in Shimoga</div>
-            <div>Wholesale & Retail Available!</div>
-          </div>
-        </body>
-      </html>
-    `;
+      .divider {
+        border-top: 1px dashed #000;
+        margin: 3mm 0;
+      }
+
+      .items-header {
+        font-size: 10px;
+        margin-bottom: 2px;
+        border-bottom: 1px solid #000;
+        padding-bottom: 1px;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .items-section div {
+        font-size: 10px;
+        margin-bottom: 1px;
+      }
+
+      .totals {
+        margin-top: 3mm;
+        padding-top: 2mm;
+        border-top: 1px dashed #000;
+      }
+
+      .total-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 1mm 0;
+      }
+
+      .final-total {
+        font-size: 12px;
+        border-top: 1px solid #000;
+        padding-top: 2mm;
+        margin-top: 2mm;
+      }
+
+      .footer {
+        text-align: center;
+        margin-top: 5mm;
+        padding-top: 3mm;
+        border-top: 1px dashed #000;
+        font-size: 9px;
+      }
+
+      @media print {
+        body { font-weight: bold; color: #000; }
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <div class="header">
+      <div class="store-name">VEEDRA THE BRAND</div>
+      <div class="store-info">Wholesalers in Western Wear</div>
+      <div class="store-info">Ethnic Wear & Indo-Western Wear</div>
+      <div class="store-info">1st Parallel Road, Durgigudi</div>
+      <div class="store-info">Shimoga – 577201</div>
+      <div class="store-info">📞 70262 09627</div>
+      <div class="store-info">GSTIN: 29GJMPP54227F1Z0</div>
+    </div>
+
+    <div style="text-align:center; font-size:11px; margin:3mm 0;">INVOICE</div>
+
+    <div class="bill-info">
+      <div>Bill No: ${bill.billNumber}</div>
+      <div>Date: ${new Date(bill.createdAt).toLocaleDateString()}</div>
+      <div>Time: ${new Date(bill.createdAt).toLocaleTimeString()}</div>
+      <div>Cashier: ${bill.staffName}</div>
+      ${bill.transactionId ? `<div>TxnID: ${bill.transactionId}</div>` : ""}
+    </div>
+
+    ${(bill.customerName !== "Walk-in Customer" || bill.customerPhone !== "N/A") ? `
+      <div class="customer-info">
+        Customer: ${bill.customerName}<br>
+        Mobile: ${bill.customerPhone}
+      </div>
+    ` : ""}
+
+    <div class="divider"></div>
+
+    <div class="items-header row">
+      <span style="width:8mm;">SL</span>
+      <span style="width:32mm;">ITEM</span>
+      <span style="width:12mm; text-align:right;">QTY</span>
+      <span style="width:12mm; text-align:right;">RATE</span>
+      <span style="width:12mm; text-align:right;">TOTAL</span>
+    </div>
+
+    <div class="items-section">
+      ${bill.items.map((item, i) => `
+        <div class="row">
+          <span style="width:8mm;">${i + 1}</span>
+          <span style="width:32mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.name}</span>
+          <span style="width:12mm; text-align:right;">${item.quantity}</span>
+          <span style="width:12mm; text-align:right;">₹${item.price.toLocaleString()}</span>
+          <span style="width:12mm; text-align:right;">₹${item.total.toLocaleString()}</span>
+        </div>
+      `).join("")}
+    </div>
+
+    <div class="totals">
+      ${(() => {
+        const gst = calculateGSTBreakdown(bill.items || []);
+        return `
+          <div class="total-row"><span>Taxable Amount:</span><span>₹${gst.totalWithoutGST.toLocaleString()}</span></div>
+
+          ${gst.sgst5 ? `
+            <div class="total-row"><span>SGST (2.5%):</span><span>₹${gst.sgst5}</span></div>
+            <div class="total-row"><span>CGST (2.5%):</span><span>₹${gst.cgst5}</span></div>
+          ` : ""}
+
+          ${gst.sgst12 ? `
+            <div class="total-row"><span>SGST (6%):</span><span>₹${gst.sgst12}</span></div>
+            <div class="total-row"><span>CGST (6%):</span><span>₹${gst.cgst12}</span></div>
+          ` : ""}
+        `;
+      })()}
+
+      <div class="total-row final-total">
+        <span>GRAND TOTAL:</span>
+        <span>₹${bill.total.toLocaleString()}</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      Payment: ${bill.paymentMethod.toUpperCase()}<br>
+      Paid: ₹${bill.receivedAmount || bill.total}<br>
+      Change: ₹${bill.change || 0}
+    </div>
+
+    <div class="divider"></div>
+
+    <div style="text-align:center; margin:2mm 0;">Terms & Conditions</div>
+    <div style="text-align:center; font-size:9px;">
+      No Exchange, No Return, No Guarantee.<br>
+      Please verify items before leaving the store.<br>
+      Working Hours: 8:00 AM – 9:00 PM
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="footer">
+      Thank You for Shopping at<br>
+      VEEDRA THE BRAND<br>
+      Best Prices in Shimoga<br>
+      Wholesale & Retail Available!
+    </div>
+
+  </body>
+</html>`;
+
 
     printWindow.document.write(receiptHTML);
     printWindow.document.close();
