@@ -1,0 +1,42 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --env-file=.env dist/index.js",
+    "compile": "tsc -b && node --env-file=.env dist/index.js",
+    "dev": "nodemon -e ts --exec \"npm run compile\"",
+    "bootstrap:techentia": "node --env-file=.env dist/lib/scripts/bootstrap.techentia.script.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "bull": "^4.16.5",
+    "cloudinary": "^2.8.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "handlebars": "^4.7.8",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.0.2",
+    "multer": "^2.0.2",
+    "nanoid": "^5.1.6",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^7.0.12",
+    "razorpay": "^2.9.6",
+    "socket.io": "^4.8.2",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/nodemailer": "^7.0.4"
+  }
+}

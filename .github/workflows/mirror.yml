@@ -19,7 +19,7 @@ jobs:
           git config --global user.name "techentia-work"
           git config --global user.email "work@techentia.in"
 
-      - name: Force push to veedra
+      - name: Force push to be-sure-qr
         run: |
           rm -rf .git
           git init
@@ -27,5 +27,5 @@ jobs:
           git reset .github/workflows  # Remove workflows from staging
           git commit -m "Mirror update from org repo"
           git branch -M main
-          git remote add origin https://techentia-work:${{ secrets.DEPLOY_PAT }}@github.com/techentia-work/veedra.git
+          git remote add origin https://techentia-work:${{ secrets.DEPLOY_PAT }}@github.com/techentia-work/be-sure-qr.git
           git push origin main --force
