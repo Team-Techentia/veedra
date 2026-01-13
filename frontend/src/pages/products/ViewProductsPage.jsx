@@ -630,7 +630,7 @@ const printSingleProduct = (product) => {
             </div>
             <div class="price-info">
               <div><strong>MRP:</strong> ₹${p.pricing?.mrp || '_________'}</div>
-              <div><strong>Discounted Price (15% Off):</strong> ₹${p.pricing?.discountedPrice || '_________'}</div>
+              <div><strong>Offer Price:</strong> ₹${p.pricing?.discountedPrice || '_________'}</div>
             </div>
           </div>
           <div class="barcode">
