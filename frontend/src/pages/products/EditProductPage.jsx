@@ -86,14 +86,14 @@ const EditProductPage = () => {
 
   // Calculate prices automatically based on factory price
   const calculatePrices = (factoryPrice) => {
-    const profitPrice = factoryPrice * 2;
-    const gstRate = getGSTRate(profitPrice);
-    const gst = profitPrice * gstRate;
-    const afterGst = profitPrice + gst;
-    const commission = (afterGst / 500) * 30;
-    const offer = Math.round(afterGst + commission);
-    const price15 = Math.round(offer / 0.75); // Reverse 25% discount
-    const mrp = Math.round(price15 / 0.85);   // Reverse 15% discount
+    // const profitPrice = factoryPrice * 2;
+    // const gstRate = getGSTRate(profitPrice);
+    // const gst = profitPrice * gstRate;
+    // const afterGst = profitPrice + gst;
+    // const commission = (afterGst / 500) * 30;
+    const mrp = factoryPrice * 2;   // Reverse 15% discount
+    const offer = (factoryPrice / 0.6).toFixed(2);
+    const price15 = offer; // Reverse 25% discount // Reverse 15% discount
 
     return {
       offer,
