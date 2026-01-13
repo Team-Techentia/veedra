@@ -1,35 +1,58 @@
-// lib/types/product/product.types.ts
 import mongoose, { Document, Model } from "mongoose";
 
-export interface IProductCategoryRef {
-  categoryId: string; // business categoryId
-  primary: boolean;
+export type TProductStatus = "ACTIVE" | "INACTIVE";
+
+export interface IProductImage {
+  url: string;
+  publicId?: string; // (optional) if using cloudinary later
 }
 
-// ---------------- Base Interface ----------------
+export interface IProductPricing {
+  factoryPrice: number;
+
+  // Auto-rule calculated fields
+  mrp: number;
+  offerPrice: number;
+
+  gstPercent: number;
+
+  // If true → allow manual override in create/update
+  allowOverride: boolean;
+
+  lastCalculatedAt?: Date;
+}
+
 export interface IProduct {
   orgId: mongoose.Types.ObjectId;
 
-  productId: string; // business identifier (stable ID)
-  sku: string; // unique per org (non-deleted)
-
+  productId: string; // business id
   name: string;
-  description?: string;
+
+  // ✅ Separate entities
+  categoryId: mongoose.Types.ObjectId;       // ref Category
+  subCategoryId?: mongoose.Types.ObjectId;   // ref SubCategory (optional)
+
+  size?: string;
+  color?: string;
   brand?: string;
+  gender?: "MENS" | "LADIES";
 
-  hsn?: string;
-  defaultGstRate?: number;
+  hsnCode?: string;
 
-  categories: IProductCategoryRef[];
+  // unique per org
+  barcode: string;
+  sku: string;
 
-  attributes: Record<string, any>; // size, color, fabric
-  tags: string[];
+  images: IProductImage[];
 
-  isActive: boolean;
+  pricing: IProductPricing;
+
+  status: TProductStatus;
+
+  createdBy: mongoose.Types.ObjectId;
+
   isDeleted: boolean;
   deletedAt?: Date;
-
-  createdBy?: mongoose.Types.ObjectId;
 
   createdAt?: Date;
   updatedAt?: Date;
@@ -37,18 +60,12 @@ export interface IProduct {
 
 // ---------------- Document Interface ----------------
 export interface IProductDocument extends IProduct, Document {
-  markInactive(): Promise<IProductDocument>;
-  markActive(): Promise<IProductDocument>;
+  recalcPricing(): Promise<IProductDocument>;
   softDelete(): Promise<IProductDocument>;
-  setPrimaryCategory(categoryId: string): Promise<IProductDocument>;
-
-  statusLabel: string; // virtual
 }
 
 // ---------------- Model Interface ----------------
 export interface IProductModel extends Model<IProductDocument> {
-  findActiveOne(orgId: mongoose.Types.ObjectId, productId: string): Promise<IProductDocument | null>;
-  findBySku(orgId: mongoose.Types.ObjectId, sku: string): Promise<IProductDocument | null>;
   findOrgProducts(orgId: mongoose.Types.ObjectId): Promise<IProductDocument[]>;
-  findActiveOrgProducts(orgId: mongoose.Types.ObjectId): Promise<IProductDocument[]>;
+  findByBarcode(orgId: mongoose.Types.ObjectId, barcode: string): Promise<IProductDocument | null>;
 }

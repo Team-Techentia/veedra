@@ -1,36 +1,18 @@
-// lib/types/category/category.types.ts
 import mongoose, { Document, Model } from "mongoose";
 
-export type TCategoryType = "CATEGORY" | "BRAND" | "COLLECTION" | "ATTRIBUTE";
+export type TCategoryStatus = "ACTIVE" | "INACTIVE";
 
-// ---------------- Base Interface ----------------
 export interface ICategory {
   orgId: mongoose.Types.ObjectId;
 
-  categoryId: string; // business identifier (unique per org, non-deleted)
-
+  categoryId: string; // business id
   name: string;
-  slug: string; // unique per org (non-deleted)
-  fullSlug: string; // parent chain: men/shirts/formal
+  code: string;
 
-  parent?: string; // categoryId of parent (not ObjectId, stable business ref)
+  status: TCategoryStatus;
 
-  ancestors: string[]; // list of categoryIds (root -> parent)
-  path: string[]; // same but may contain names/slugs (you decide); keep stable
-  level: number;
-  order: number;
+  createdBy: mongoose.Types.ObjectId;
 
-  type: TCategoryType;
-
-  isLeaf: boolean;
-  productCount: number;
-
-  // versioning
-  version: number;
-  effectiveFrom: Date;
-  effectiveTo?: Date;
-
-  isActive: boolean;
   isDeleted: boolean;
   deletedAt?: Date;
 
@@ -38,23 +20,44 @@ export interface ICategory {
   updatedAt?: Date;
 }
 
-// ---------------- Document Interface ----------------
 export interface ICategoryDocument extends ICategory, Document {
-  activate(): Promise<ICategoryDocument>;
-  deactivate(): Promise<ICategoryDocument>;
   softDelete(): Promise<ICategoryDocument>;
-
-  // versioning: create new version instead of mutating meaning
-  createNewVersion(input: Partial<Pick<ICategory, "name" | "slug" | "fullSlug" | "path" | "order" | "isLeaf">>): Promise<ICategoryDocument>;
-
-  statusLabel: string; // virtual
 }
 
-// ---------------- Model Interface ----------------
 export interface ICategoryModel extends Model<ICategoryDocument> {
-  findActiveOne(orgId: mongoose.Types.ObjectId, categoryId: string): Promise<ICategoryDocument | null>;
-  findBySlug(orgId: mongoose.Types.ObjectId, slug: string): Promise<ICategoryDocument | null>;
   findOrgCategories(orgId: mongoose.Types.ObjectId): Promise<ICategoryDocument[]>;
-  findActiveOrgCategories(orgId: mongoose.Types.ObjectId): Promise<ICategoryDocument[]>;
-  findChildren(orgId: mongoose.Types.ObjectId, parentCategoryId: string): Promise<ICategoryDocument[]>;
+  findByCode(orgId: mongoose.Types.ObjectId, code: string): Promise<ICategoryDocument | null>;
+}
+// import mongoose, { Document, Model } from "mongoose";
+
+export type TSubCategoryStatus = "ACTIVE" | "INACTIVE";
+
+export interface ISubCategory {
+  orgId: mongoose.Types.ObjectId;
+
+  subCategoryId: string; // business id
+  categoryId: mongoose.Types.ObjectId;
+
+  name: string;
+  code: string;
+
+  status: TSubCategoryStatus;
+
+  createdBy: mongoose.Types.ObjectId;
+
+  isDeleted: boolean;
+  deletedAt?: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface ISubCategoryDocument extends ISubCategory, Document {
+  softDelete(): Promise<ISubCategoryDocument>;
+}
+
+export interface ISubCategoryModel extends Model<ISubCategoryDocument> {
+  findOrgSubCategories(orgId: mongoose.Types.ObjectId): Promise<ISubCategoryDocument[]>;
+  findCategorySubCategories(orgId: mongoose.Types.ObjectId, categoryId: mongoose.Types.ObjectId): Promise<ISubCategoryDocument[]>;
+  findByCode(orgId: mongoose.Types.ObjectId, code: string): Promise<ISubCategoryDocument | null>;
 }

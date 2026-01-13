@@ -5,5 +5,5 @@ export type { IProduct, IProductDocument, IProductModel, } from "./product/produ
 export type { NotificationPayload, NotificationPreferences, EmailOptions, PushOptions, SMSOptions, } from "./notification/notification.types.js"
 
 export { } from "./auth/auth.types.js";
-export { UserAccountStatus } from "./user/user.enums.js";
+// export { UserAccountStatus } from "./user/user.enums.js";
 export { NotificationChannel, NotificationPriority, NotificationStatus, NotificationType, } from "./notification/notification.enums.js"
