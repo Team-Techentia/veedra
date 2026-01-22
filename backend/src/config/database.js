@@ -2,7 +2,17 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
+    const dbMode = process.env.USE_SAFE_DB === 'true' ? 'SAFE_MODE' : 'PRODUCTION';
+    const dbURI = process.env.USE_SAFE_DB === 'true'
+      ? process.env.MONGODB_URI_SAFE
+      : process.env.MONGODB_URI;
+
+    console.log(`🛡️  Database running in: ${dbMode}`);
+    if (dbMode === 'SAFE_MODE') {
+      console.log(`📝 Using Database: ${process.env.MONGODB_URI_SAFE.split('/').pop().split('?')[0]}`);
+    }
+
+    const conn = await mongoose.connect(dbURI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });

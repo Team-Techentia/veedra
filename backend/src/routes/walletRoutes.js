@@ -1,24 +1,19 @@
 const express = require('express');
-const { protect, isOwner } = require('../middleware/auth');
+const router = express.Router();
+const { protect } = require('../middleware/auth');
 const {
-  getWallets,
-  getWallet,
-  getWalletTransactions,
-  processCommissionPayout,
-  adjustWalletBalance
+    getWalletByPhone,
+    calculatePointsEarned,
+    updateWalletPoints
 } = require('../controllers/walletController');
 
-const router = express.Router();
+// Get wallet by phone number
+router.get('/phone/:phone', protect, getWalletByPhone);
 
-// All routes protected
-router.use(protect);
+// Calculate points for a bill amount
+router.post('/calculate-points', protect, calculatePointsEarned);
 
-router.get('/', getWallets);
-router.get('/:id', getWallet);
-router.get('/:id/transactions', getWalletTransactions);
-
-// Owner only routes
-router.post('/:id/payout', isOwner, processCommissionPayout);
-router.post('/:id/adjust', isOwner, adjustWalletBalance);
+// Update wallet points (earn/redeem)
+router.post('/update', protect, updateWalletPoints);
 
 module.exports = router;

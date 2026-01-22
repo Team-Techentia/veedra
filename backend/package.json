@@ -9,7 +9,8 @@
     "seed": "node src/scripts/seedData.js",
     "test": "jest",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint:fix": "eslint src/ --fix",
+    "db:sync": "node src/scripts/syncDb.js"
   },
   "keywords": [
     "erp",

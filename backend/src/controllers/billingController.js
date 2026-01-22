@@ -6,7 +6,7 @@ const Product = require('../models/Product');
 const createBill = asyncHandler(async (req, res) => {
   try {
     console.log('📥 Received bill data:', JSON.stringify(req.body, null, 2));
-    
+
     const {
       customer,
       items,
@@ -27,7 +27,7 @@ const createBill = asyncHandler(async (req, res) => {
     // ✅ STOCK VALIDATION - Check if all items have sufficient stock
     for (const item of items) {
       const product = await Product.findById(item.product || item._id);
-      
+
       if (!product) {
         return res.status(404).json({
           success: false,
@@ -53,7 +53,7 @@ const createBill = asyncHandler(async (req, res) => {
     // Transform items to match schema
     const billItems = items.map(item => {
       console.log('Processing item:', item);
-      
+
       return {
         product: item.product || item._id,
         productName: item.productName || item.name,
@@ -135,17 +135,17 @@ const createBill = asyncHandler(async (req, res) => {
     for (const item of billItems) {
       try {
         const product = await Product.findById(item.product);
-        
+
         if (product) {
           // Reduce product stock
           const oldStock = product.inventory.currentStock;
           product.inventory.currentStock = Math.max(0, oldStock - item.quantity);
-          
+
           // Update total sold
           product.totalSold = (product.totalSold || 0) + item.quantity;
-          
+
           await product.save();
-          
+
           console.log(`✅ Stock reduced for ${product.name}: ${oldStock} → ${product.inventory.currentStock} (-${item.quantity})`);
 
           // If product has parent (variant case), reduce parent stock too
@@ -211,7 +211,7 @@ const getBills = asyncHandler(async (req, res) => {
 
     // Build query
     let query = {};
-    
+
     // Date range filter
     if (startDate && endDate) {
       query.createdAt = {
@@ -240,7 +240,7 @@ const getBills = asyncHandler(async (req, res) => {
     // Transform data for frontend
     const transformedBills = bills.map(bill => {
       const correctTotal = Math.max(0, bill.totals?.finalAmount || bill.totals?.grandTotal || 0);
-      
+
       return {
         _id: bill._id,
         billNumber: bill.billNumber,
@@ -250,6 +250,7 @@ const getBills = asyncHandler(async (req, res) => {
           name: item.productName,
           quantity: item.quantity,
           price: item.unitPrice,
+          mrp: item.mrp,
           total: item.totalAmount,
           isCombo: item.comboAssignment?.isComboItem || false
         })),
@@ -370,7 +371,7 @@ const generateInvoice = asyncHandler(async (req, res) => {
 const getDailySales = asyncHandler(async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     const start = startDate ? new Date(startDate) : new Date(new Date().setHours(0, 0, 0, 0));
     const end = endDate ? new Date(endDate) : new Date(new Date().setHours(23, 59, 59, 999));
 
@@ -437,7 +438,7 @@ const getStaffSales = asyncHandler(async (req, res) => {
   try {
     const staffId = req.params.staffId || req.user._id;
     const { startDate, endDate } = req.query;
-    
+
     const start = startDate ? new Date(startDate) : new Date(new Date().setHours(0, 0, 0, 0));
     const end = endDate ? new Date(endDate) : new Date(new Date().setHours(23, 59, 59, 999));
 

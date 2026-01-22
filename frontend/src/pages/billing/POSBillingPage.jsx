@@ -6,6 +6,8 @@ import comboService from '../../services/comboService';
 import billingService from '../../services/billingService';
 import paymentService from '../../services/paymentService';
 import categoryService from '../../services/categoryService';
+import walletService from '../../services/walletService';
+import generateReceiptHTML from '../../utils/receiptGenerator';
 
 // Utility functions - matches reference implementation
 const fmt = (n) => "₹" + Number(n || 0).toFixed(2);
@@ -29,13 +31,13 @@ function computeStatus({ validFrom, validTo, paused }) {
 function calculateGSTBreakdown(totalAmount, items = []) {
   // Determine GST rate based on total bill amount (not individual items)
   const gstRate = totalAmount > 2500 ? 12 : 5; // 12% or 5%
-  
+
   // Reverse GST calculation (GST is already included in the selling price)
   const gstAmount = (totalAmount * gstRate) / (100 + gstRate);
   const baseAmount = totalAmount - gstAmount;
   const sgst = gstAmount / 2;
   const cgst = gstAmount / 2;
-  
+
   return {
     baseAmount: Math.round(baseAmount * 100) / 100,
     totalGST: Math.round(gstAmount * 100) / 100,
@@ -58,41 +60,48 @@ const POSBillingPage = () => {
   const [products, setProducts] = useState([]);
   const [combos, setCombos] = useState([]);
   const [categories, setCategories] = useState([]);
-  
+
   // Cart state - matches reference structure
   const [cart, setCart] = useState([]); // Single products
   const [selectedCombos, setSelectedCombos] = useState([]); // Applied combos
-  
+
   // UI state
   const [searchTerm, setSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [qtyInput, setQtyInput] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState('');
-  
+
   // Camera scanning state
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState('');
-  
+
   // Customer info
   const [customerInfo, setCustomerInfo] = useState({
     name: '',
     phone: ''
   });
-  
+
   // Payment state
   const [paymentAmounts, setPaymentAmounts] = useState({
     cash: 0,
     upi: 0
   });
-  
+
   // Loading and processing states
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [lastBill, setLastBill] = useState(null);
-  
+
   // Cart item ID generator for unique tracking
   const [nextCartItemId, setNextCartItemId] = useState(1);
-  
+
+  // Wallet state
+  const [walletData, setWalletData] = useState(null);
+  const [loadingWallet, setLoadingWallet] = useState(false);
+  const [pointsToEarn, setPointsToEarn] = useState(0);
+  const [pointsApplied, setPointsApplied] = useState(false);
+  const [pointPrice, setPointPrice] = useState(1); // Default 1 point = ₹1
+
   // Refs
   const barcodeInputRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -101,6 +110,7 @@ const POSBillingPage = () => {
   // Load initial data
   useEffect(() => {
     loadData();
+    fetchPointConfig();
   }, []);
 
   // Focus on barcode input when component mounts
@@ -113,7 +123,7 @@ const POSBillingPage = () => {
   // Migrate existing cart items to have cartItemId
   useEffect(() => {
     if (cart.some(item => !item.cartItemId)) {
-      setCart(prev => prev.map(item => 
+      setCart(prev => prev.map(item =>
         item.cartItemId ? item : { ...item, cartItemId: nextCartItemId }
       ));
       setNextCartItemId(prev => prev + cart.filter(item => !item.cartItemId).length);
@@ -164,6 +174,25 @@ const POSBillingPage = () => {
     };
   }, [isScanning]);
 
+  // Fetch wallet when phone number changes
+  useEffect(() => {
+    if (customerInfo.phone && /^\d{10}$/.test(customerInfo.phone)) {
+      fetchWalletByPhone(customerInfo.phone);
+    } else {
+      setWalletData(null);
+      setPointsApplied(false);
+    }
+  }, [customerInfo.phone]);
+
+  // Calculate points to earn when cart changes
+  useEffect(() => {
+    if (cart.length > 0 || selectedCombos.length > 0) {
+      calculatePointsToEarnFromBill();
+    } else {
+      setPointsToEarn(0);
+    }
+  }, [cart, selectedCombos]);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -186,17 +215,17 @@ const POSBillingPage = () => {
   // Product search and filtering - matches reference
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (product.productCode && product.productCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                         (product.barcode && product.barcode.includes(searchTerm));
-    
+      (product.productCode && product.productCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (product.barcode && product.barcode.includes(searchTerm));
+
     const matchesCategory = !selectedCategory || product.category?._id === selectedCategory;
-    
+
     return matchesSearch && matchesCategory && product.isActive && (product.inventory?.currentStock || 0) > 0;
   });
 
   // Find product by code/barcode - matches reference
   const findProductByCode = (code) => {
-    return products.find(p => 
+    return products.find(p =>
       (p.code || p.sku || p.productCode || "").toString() === code.toString() ||
       (p.barcode || "").toString() === code.toString()
     );
@@ -206,9 +235,9 @@ const POSBillingPage = () => {
   const handleBarcodeInput = async (e) => {
     if (e.key === 'Enter' && barcodeInput.trim()) {
       e.preventDefault();
-      
+
       const product = findProductByCode(barcodeInput.trim());
-      
+
       if (product) {
         if ((product.inventory?.currentStock || 0) <= 0) {
           toast.error('Product is out of stock!');
@@ -220,25 +249,25 @@ const POSBillingPage = () => {
         if (window.confirm("Product not found in catalog. Add as free-text single item?")) {
           const customName = window.prompt("Enter product name:") || ("Item " + barcodeInput);
           const customPrice = Number(window.prompt("Enter MRP:") || 0);
-          
+
           const customProduct = {
             _id: 'custom_' + Date.now(),
             name: customName,
             productCode: barcodeInput,
-            pricing: { 
+            pricing: {
               offerPrice: customPrice,
               discountedPrice: null // Custom products don't have discounted price
             },
             inventory: { currentStock: 999 },
             isActive: true
           };
-          
+
           // Add to products temporarily
           setProducts(prev => [...prev, customProduct]);
           assignScannedProduct(customProduct, qtyInput);
         }
       }
-      
+
       setBarcodeInput('');
       setQtyInput(1);
     }
@@ -259,29 +288,29 @@ const POSBillingPage = () => {
     // Strategy: Try most recent combo first (last added), then work backwards
     for (let comboIndex = selectedCombos.length - 1; comboIndex >= 0; comboIndex--) {
       const combo = selectedCombos[comboIndex];
-      
+
       // Find unfilled slots in this combo
       const unfilledSlots = combo.slots?.filter(slot => !slot.assigned) || [];
-      
+
       if (unfilledSlots.length === 0) continue; // Skip filled combos
-      
+
       // Try to find the first available slot that accepts this product
       for (let slot of unfilledSlots) {
         const minPrice = slot.minPrice || 0;
         const maxPrice = slot.maxPrice || 999999;
-        
+
         // Get the appropriate price for comparison (discounted price first, then offer price)
         const productPrice = Number(product.pricing?.discountedPrice || product.pricing?.offerPrice || 0);
-        
+
         // Accept if no price constraints or within range
-        const fitsSlot = (minPrice === 0 && maxPrice === 0) || 
-                        (productPrice >= minPrice && productPrice <= maxPrice);
-        
+        const fitsSlot = (minPrice === 0 && maxPrice === 0) ||
+          (productPrice >= minPrice && productPrice <= maxPrice);
+
         if (fitsSlot) {
           // Assign product to this slot
           // Find an available cart item for this product (not already fully assigned to combos)
           const assignedCartItemQuantities = new Map();
-          
+
           // Calculate how much of each cartItemId is already assigned to other combos
           selectedCombos.forEach((otherCombo, otherIndex) => {
             if (otherIndex !== comboIndex && otherCombo.slots) {
@@ -294,21 +323,21 @@ const POSBillingPage = () => {
               });
             }
           });
-          
+
           // Find a cart item with available quantity
           let availableCartItem = null;
           const matchingCartItems = cart.filter(item => item._id === product._id);
-          
+
           for (const cartItem of matchingCartItems) {
             const assignedQty = assignedCartItemQuantities.get(cartItem.cartItemId) || 0;
             const availableQty = cartItem.quantity - assignedQty;
-            
+
             if (availableQty > 0) {
               availableCartItem = cartItem;
               break;
             }
           }
-          
+
           // If no cart items found, automatically add the product to cart
           if (!availableCartItem && matchingCartItems.length === 0) {
             // Check stock first
@@ -322,10 +351,10 @@ const POSBillingPage = () => {
                 isComboApplied: false,
                 cartItemId: nextCartItemId
               };
-              
+
               setCart(prev => [...prev, newCartItem]);
               setNextCartItemId(prev => prev + 1);
-              
+
               availableCartItem = newCartItem;
               toast.success(`Added ${product.name} to cart for combo`);
             } else {
@@ -333,25 +362,25 @@ const POSBillingPage = () => {
               break;
             }
           }
-          
+
           if (availableCartItem) {
             slot.assigned = {
               product: product,
               qty: 1, // Only 1 unit gets combo pricing
               cartItemId: availableCartItem.cartItemId
             };
-            
+
             // Update selectedCombos
-            setSelectedCombos(prev => prev.map((c, idx) => 
+            setSelectedCombos(prev => prev.map((c, idx) =>
               idx === comboIndex ? combo : c
             ));
           } else {
             toast.error(`Not enough quantity available for ${product.name} in cart`);
             break;
           }
-          
+
           assigned = true;
-          
+
           // Check if combo is now complete
           const isComboComplete = combo.slots?.every(s => s.assigned);
           if (isComboComplete) {
@@ -360,22 +389,22 @@ const POSBillingPage = () => {
             const remainingSlots = combo.slots?.filter(s => !s.assigned).length || 0;
 
           }
-          
+
           break;
         }
       }
-      
+
       if (assigned) break;
     }
 
-  if (!assigned) {
+    if (!assigned) {
       // Add to single products
       const existingItem = cart.find(item => item._id === product._id);
-      
+
       if (existingItem) {
         const newQuantity = existingItem.quantity + qty;
         const availableStock = product.inventory?.currentStock || 0;
-        
+
         if (newQuantity <= availableStock) {
           setCart(prev => prev.map(item =>
             item._id === product._id
@@ -388,7 +417,7 @@ const POSBillingPage = () => {
         }
       } else {
         const availableStock = product.inventory?.currentStock || 0;
-        
+
         if (qty <= availableStock) {
           setCart(prev => [...prev, {
             ...product,
@@ -413,7 +442,7 @@ const POSBillingPage = () => {
       validTo: combo.validTo,
       paused: combo.paused
     });
-    
+
     if (status !== 'active') {
 
       return;
@@ -442,11 +471,11 @@ const POSBillingPage = () => {
     };
 
     setSelectedCombos(prev => [...prev, comboInstance]);
-    
+
     // Enhanced feedback
     const slotCount = slots.length;
 
-    
+
     // Auto-focus search input for immediate product scanning
     if (searchInputRef.current) {
       setTimeout(() => {
@@ -458,13 +487,13 @@ const POSBillingPage = () => {
   // Remove combo - matches reference
   const removeComboInstance = (comboToRemove) => {
     if (!window.confirm("Remove this combo from the bill?")) return;
-    
+
     // Move assigned products back to singles
     comboToRemove.slots?.forEach(slot => {
       if (slot.assigned) {
         const product = slot.assigned.product;
         const qty = slot.assigned.qty;
-        
+
         // Add back to cart as single
         const existingItem = cart.find(item => item._id === product._id);
         if (existingItem) {
@@ -485,14 +514,14 @@ const POSBillingPage = () => {
         }
       }
     });
-    
+
     // Remove combo
     setSelectedCombos(prev => prev.filter(combo => combo._id !== comboToRemove._id));
 
   };
 
   // Update quantity
- const updateQuantity = (productId, newQuantity) => {
+  const updateQuantity = (productId, newQuantity) => {
     if (newQuantity === 0) {
       removeFromCart(productId);
       return;
@@ -500,12 +529,12 @@ const POSBillingPage = () => {
 
     const product = products.find(p => p._id === productId);
     const availableStock = product?.inventory?.currentStock || 0;
-    
+
     if (!product) {
       toast.error('Product not found');
       return;
     }
-    
+
     if (newQuantity > availableStock) {
       toast.error(`Insufficient stock! Available: ${availableStock}`);
       return;
@@ -524,7 +553,7 @@ const POSBillingPage = () => {
   };
 
 
-  
+
 
 
   // Get combo assignments map
@@ -559,7 +588,7 @@ const POSBillingPage = () => {
     cart.forEach(item => {
       const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
       const quantityForSingles = Math.max(0, item.quantity - assignedQty);
-      
+
       if (quantityForSingles === 0 && assignedQty > 0) {
         consumedItems.push(item.name);
       }
@@ -568,7 +597,7 @@ const POSBillingPage = () => {
     return consumedItems;
   };
 
-    // Calculate totals using cart item IDs for precise tracking
+  // Calculate totals using cart item IDs for precise tracking
   const calculateSinglesSubtotal = () => {
     // Get set of cart item IDs that are assigned to combos with their assigned quantities
     const assignedCartItemQuantities = new Map();
@@ -585,66 +614,66 @@ const POSBillingPage = () => {
     });
 
     let singlesTotal = 0;
-    
+
     cart.forEach(item => {
       // Calculate remaining quantity after combo assignments
       const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
       const quantityForSingles = Math.max(0, item.quantity - assignedQty);
-      
+
       // Always use offer price for singles
       const singlePrice = Number(item.pricing?.offerPrice || item.price || 0);
       singlesTotal += quantityForSingles * singlePrice;
     });
-    
+
     return singlesTotal;
-  };  const calculateCombosSubtotal = () => {
+  }; const calculateCombosSubtotal = () => {
     const combosTotal = selectedCombos.reduce((sum, combo) => {
       const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
       const comboPrice = allSlotsFilled ? Number(combo.offerPrice || 0) : 0;
       return sum + comboPrice;
     }, 0);
-    
+
     return combosTotal;
   };
 
   // Calculate adjusted price for a product in a combo using the formula:
   // Adjusted Price = (Product MRP / Total MRP) × Combo Price
-const calculateAdjustedPrice = (combo, slot) => {
-  if (!combo || !slot || !slot.assigned) return 0;
-  
-  const allSlotsFilled = combo.slots?.every(s => s.assigned) || false;
-  if (!allSlotsFilled) {
-    return Number(slot.assigned.product.pricing?.offerPrice || 0);
-  }
-  
-  // Calculate total MRP of all assigned products
-  const totalMRP = combo.slots.reduce((sum, s) => {
-    if (s.assigned) {
-      const price = Number(s.assigned.product.pricing?.offerPrice || 0);
-      const qty = s.assigned.qty || 1;
-      return sum + (price * qty);
+  const calculateAdjustedPrice = (combo, slot) => {
+    if (!combo || !slot || !slot.assigned) return 0;
+
+    const allSlotsFilled = combo.slots?.every(s => s.assigned) || false;
+    if (!allSlotsFilled) {
+      return Number(slot.assigned.product.pricing?.offerPrice || 0);
     }
-    return sum;
-  }, 0);
-   if (totalMRP === 0) return 0;
-  
-  // Calculate: (Product Price × Qty / Total MRP) × Combo Offer Price
-  const productPrice = Number(slot.assigned.product.pricing?.offerPrice || 0);
-  const productQty = slot.assigned.qty || 1;
-  const productMRP = productPrice * productQty;
-  const comboPrice = Number(combo.offerPrice || 0);
-  
-  const adjustedPrice = (productMRP / totalMRP) * comboPrice;
-  
-  // Return per-unit adjusted price
-  return Math.round(adjustedPrice / productQty);
-};
+
+    // Calculate total MRP of all assigned products
+    const totalMRP = combo.slots.reduce((sum, s) => {
+      if (s.assigned) {
+        const price = Number(s.assigned.product.pricing?.offerPrice || 0);
+        const qty = s.assigned.qty || 1;
+        return sum + (price * qty);
+      }
+      return sum;
+    }, 0);
+    if (totalMRP === 0) return 0;
+
+    // Calculate: (Product Price × Qty / Total MRP) × Combo Offer Price
+    const productPrice = Number(slot.assigned.product.pricing?.offerPrice || 0);
+    const productQty = slot.assigned.qty || 1;
+    const productMRP = productPrice * productQty;
+    const comboPrice = Number(combo.offerPrice || 0);
+
+    const adjustedPrice = (productMRP / totalMRP) * comboPrice;
+
+    // Return per-unit adjusted price
+    return Math.round(adjustedPrice / productQty);
+  };
 
   const calculateTotalSavings = () => {
     return selectedCombos.reduce((totalSavings, combo) => {
       const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
       if (!allSlotsFilled) return totalSavings;
-      
+
       // Calculate original total MRP
       const sumMRP = combo.slots.reduce((sum, slot) => {
         if (slot.assigned) {
@@ -652,7 +681,7 @@ const calculateAdjustedPrice = (combo, slot) => {
         }
         return sum;
       }, 0);
-      
+
       // Savings = Original Total - Combo Offer Price
       return totalSavings + Math.max(0, sumMRP - Number(combo.offerPrice || 0));
     }, 0);
@@ -662,10 +691,83 @@ const calculateAdjustedPrice = (combo, slot) => {
     return calculateSinglesSubtotal() + calculateCombosSubtotal();
   };
 
+  // Wallet functions
+  const fetchPointConfig = async () => {
+    try {
+      const response = await walletService.getPointConfig();
+      const price = response.data?.pointPrice || 1;
+      setPointPrice(price);
+      console.log(`\ud83d\udcb0 Point price loaded: 1 point = \u20b9${price}`);
+    } catch (error) {
+      console.error('Error fetching point config:', error);
+      setPointPrice(1); // Fallback to default
+    }
+  };
+
+  const fetchWalletByPhone = async (phone) => {
+    if (!phone || !/^\d{10}$/.test(phone)) {
+      setWalletData(null);
+      return;
+    }
+
+    try {
+      setLoadingWallet(true);
+      const response = await walletService.getWalletByPhone(phone);
+      setWalletData(response.data);
+    } catch (error) {
+      console.error('Error fetching wallet:', error);
+      setWalletData(null);
+    } finally {
+      setLoadingWallet(false);
+    }
+  };
+
+  const calculatePointsToEarnFromBill = async () => {
+    const total = calculateGrandTotal();
+    console.log(`📊 [Points Calculation] Bill total: ₹${total}`);
+
+    if (total <= 0) {
+      setPointsToEarn(0);
+      console.log('⚠️ [Points Calculation] Total is 0, no points to earn');
+      return;
+    }
+
+    try {
+      const response = await walletService.calculatePointsEarned(total);
+      const points = response.data.pointsEarned || 0;
+      setPointsToEarn(points);
+      console.log(`✅ [Points Calculation] Points to earn: ${points} (for ₹${total})`);
+    } catch (error) {
+      console.error('❌ [Points Calculation] Error calculating points:', error);
+      setPointsToEarn(0);
+    }
+  };
+
+  const togglePointRedemption = () => {
+    if (!walletData || walletData.points <= 0) {
+      toast.error('No points available to redeem');
+      return;
+    }
+    setPointsApplied(!pointsApplied);
+    toast.success(pointsApplied ? 'Points removed' : 'Points applied!');
+  };
+
+  const calculateFinalTotal = () => {
+    const grandTotal = calculateGrandTotal();
+    if (pointsApplied && walletData) {
+      // Calculate discount: points * point price
+      const pointValue = walletData.points * pointPrice;
+      const discount = Math.min(pointValue, grandTotal); // Can't exceed bill total
+      console.log(`\ud83d\udcb0 Applying points: ${walletData.points} pts \u00d7 \u20b9${pointPrice} = \u20b9${pointValue} (discount: \u20b9${discount})`);
+      return Math.max(0, grandTotal - discount);
+    }
+    return grandTotal;
+  };
+
   // Camera scanning functions
   const startCameraScanning = async () => {
     if (isScanning) return;
-    
+
     // Check for camera permission first
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -675,7 +777,7 @@ const calculateAdjustedPrice = (combo, slot) => {
       setCameraError('Camera access denied');
       return;
     }
-    
+
     if (!window.Quagga) {
       toast.error('Camera scanning not available. QuaggaJS not loaded.');
       return;
@@ -737,7 +839,7 @@ const calculateAdjustedPrice = (combo, slot) => {
         toast.error('Camera initialization failed: ' + (err.message || 'Unknown error'));
         return;
       }
-      
+
       console.log('Quagga initialized successfully');
       window.Quagga.start();
       toast.success('Camera scanning started - Point at barcode');
@@ -747,20 +849,20 @@ const calculateAdjustedPrice = (combo, slot) => {
     window.Quagga.onDetected((result) => {
       const code = result.codeResult.code;
       console.log('Barcode detected:', code);
-      
+
       // Validate barcode (basic check)
       if (code && code.length >= 3) {
         // Set the barcode input and trigger product search
         setBarcodeInput(code);
-        
+
         // Auto-add the product
         setTimeout(() => {
-          handleBarcodeInput({ key: 'Enter', preventDefault: () => {} });
+          handleBarcodeInput({ key: 'Enter', preventDefault: () => { } });
         }, 100);
-        
+
         // Stop scanning after detection to avoid duplicates
         stopCameraScanning();
-        
+
         // Visual feedback
         toast.success(`Scanned: ${code}`);
       } else {
@@ -778,7 +880,7 @@ const calculateAdjustedPrice = (combo, slot) => {
 
   const stopCameraScanning = () => {
     if (!isScanning) return;
-    
+
     if (window.Quagga) {
       try {
         window.Quagga.stop();
@@ -789,7 +891,7 @@ const calculateAdjustedPrice = (combo, slot) => {
         console.error('Error stopping camera:', error);
       }
     }
-    
+
     setIsScanning(false);
     toast.info('Camera scanning stopped');
   };
@@ -797,23 +899,23 @@ const calculateAdjustedPrice = (combo, slot) => {
   // Request camera permissions
   const requestCameraPermission = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
           facingMode: "environment",
           width: { ideal: 320 },
           height: { ideal: 240 }
-        } 
+        }
       });
-      
+
       // Stop the stream immediately as we just wanted to get permission
       stream.getTracks().forEach(track => track.stop());
-      
+
       setCameraError('');
       toast.success('Camera permission granted');
       return true;
     } catch (error) {
       console.error('Camera permission error:', error);
-      
+
       let errorMessage = 'Camera access denied';
       if (error.name === 'NotFoundError') {
         errorMessage = 'No camera found';
@@ -822,7 +924,7 @@ const calculateAdjustedPrice = (combo, slot) => {
       } else if (error.name === 'NotReadableError') {
         errorMessage = 'Camera already in use';
       }
-      
+
       setCameraError(errorMessage);
       toast.error(errorMessage);
       return false;
@@ -832,19 +934,19 @@ const calculateAdjustedPrice = (combo, slot) => {
   // Clear bill
   const clearBill = () => {
     if (!window.confirm("Clear the current bill?")) return;
-    
+
     // Stop scanning if active
     if (isScanning) {
       stopCameraScanning();
     }
-    
+
     setCart([]);
     setSelectedCombos([]);
     setCustomerInfo({ name: '', phone: '' });
     setPaymentAmounts({ cash: 0, upi: 0 });
     setBarcodeInput('');
     setSearchTerm('');
-    
+
     setTimeout(() => {
       barcodeInputRef.current?.focus();
     }, 100);
@@ -852,251 +954,355 @@ const calculateAdjustedPrice = (combo, slot) => {
 
   // Finalize and print - matches reference
   // Finalize and print - FIXED VERSION
-const finalizeAndPrint = async () => {
-  if (cart.length === 0 && selectedCombos.length === 0) {
-    toast.error('Cart is empty');
-    return;
-  }
-
-  // Validate customer info
-  const mobile = customerInfo.phone.trim();
-  const name = customerInfo.name.trim() || "Customer";
-  
-  if (mobile && !/^\d{10}$/.test(mobile)) {
-    if (!window.confirm("Customer mobile invalid. Continue without saving customer?")) return;
-  }
-
-  const totalAmount = calculateGrandTotal();
-  const paidAmount = Number(paymentAmounts.cash) + Number(paymentAmounts.upi);
-  
-  if (paidAmount < totalAmount) {
-    if (!window.confirm(`Paid amount ₹${paidAmount.toFixed(2)} is less than bill total ₹${totalAmount.toFixed(2)}. Proceed and record as due?`)) return;
-  }
-
-  // Prevent double-clicking
-  if (processing) {
-    console.log('⚠️ Already processing payment, ignoring duplicate request');
-    return;
-  }
-  
-  setProcessing(true);
-  
-  try {
-    console.log('✅ Starting bill generation...');
-    
-    // Prepare final items for billing
-    const finalItems = [];
-    
-    // Get set of cart item IDs that are assigned to combos
-    const assignedCartItemQuantities = new Map();
-    selectedCombos.forEach(combo => {
-      if (combo.slots) {
-        combo.slots.forEach(slot => {
-          if (slot.assigned && slot.assigned.cartItemId) {
-            const cartItemId = slot.assigned.cartItemId;
-            const assignedQty = slot.assigned.qty || 1;
-            assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
-          }
-        });
-      }
-    });
-    
-    // Add single products
-    cart.forEach(item => {
-      const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
-      const quantityForSingles = Math.max(0, item.quantity - assignedQty);
-      
-      if (quantityForSingles > 0) {
-        finalItems.push({
-          ...item,
-          quantity: quantityForSingles,
-          price: item.pricing?.offerPrice || item.price || 0,
-          originalPrice: item.pricing?.mrp || item.price || 0,
-          isComboApplied: false
-        });
-      }
-    });
-    
-    // Add combo products with adjusted pricing
-    selectedCombos.forEach(combo => {
-      const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
-      if (allSlotsFilled) {
-        combo.slots.forEach(slot => {
-          if (slot.assigned) {
-            const adjustedPrice = calculateAdjustedPrice(combo, slot);
-            
-            finalItems.push({
-              ...slot.assigned.product,
-              quantity: slot.assigned.qty,
-              price: adjustedPrice,
-              originalPrice: slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0,
-              isComboApplied: true,
-              appliedComboName: combo.name,
-              comboPrice: adjustedPrice
-            });
-          }
-        });
-      }
-    });
-
-    // Separate items for bill
-    const singlesItems = finalItems.filter(item => !item.isComboApplied);
-    const comboItems = finalItems.filter(item => item.isComboApplied);
-
-    // Create bill data structure
-    const billData = {
-      billNumber: `B${Date.now()}`,
-      transactionId: `TXN${Date.now()}`,
-      date: new Date(),
-      customer: {
-        name: name,
-        phone: mobile
-      },
-      items: finalItems,
-      singlesItems: singlesItems,
-      comboItems: comboItems,
-      subtotal: calculateSinglesSubtotal(),
-      combosTotal: calculateCombosSubtotal(),
-      total: totalAmount,
-      discount: calculateTotalSavings(),
-      paymentMethod: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? 'mix' : 
-                    paymentAmounts.cash > 0 ? 'cash' : 'upi',
-      receivedAmount: paidAmount,
-      change: Math.max(0, paidAmount - totalAmount),
-      combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
-    };
-    
-    console.log('💾 Bill data prepared:', billData);
-    
-    // Try to save to backend (optional - don't block printing)
-    try {
-      const paymentData = {
-        customer: {
-          name: name,
-          phone: mobile,
-          email: ''
-        },
-        items: finalItems.map(item => ({
-          product: item._id,
-          productName: item.name,
-          productCode: item.productCode || item.code || 'N/A',
-          quantity: item.quantity,
-          unitPrice: item.price,
-          mrp: item.originalPrice || item.price,
-          totalAmount: item.price * item.quantity,
-          tax: 0,
-          discount: item.isComboApplied ? (item.originalPrice - item.price) : 0,
-          comboAssignment: item.isComboApplied ? {
-            isComboItem: true,
-            comboName: item.appliedComboName
-          } : null
-        })),
-        totals: {
-          subtotal: billData.subtotal + billData.combosTotal,
-          totalTax: 0,
-          totalDiscount: billData.discount,
-          grandTotal: totalAmount,
-          finalAmount: totalAmount
-        },
-        payment: {
-          method: billData.paymentMethod,
-          amount: totalAmount,
-          receivedAmount: paidAmount,
-          changeGiven: billData.change,
-          transactionId: billData.transactionId,
-          status: 'paid',
-          mixPaymentDetails: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? {
-            cash: Number(paymentAmounts.cash),
-            upi: Number(paymentAmounts.upi)
-          } : null
-        },
-        status: 'completed'
-      };
-
-      console.log('📤 Sending to backend...');
-      const response = await billingService.createBill(paymentData);
-      
-      if (response.success && response.data) {
-        billData.billNumber = response.data.billNumber;
-        billData.transactionId = response.data.transactionId;
-        console.log('✅ Backend save successful:', response.data.billNumber);
-      }
-    } catch (backendError) {
-      console.warn('⚠️ Backend save failed, continuing with offline bill:', backendError);
-      // Continue with offline bill - don't stop the process
+  const finalizeAndPrint = async () => {
+    if (cart.length === 0 && selectedCombos.length === 0) {
+      toast.error('Cart is empty');
+      return;
     }
-    
-    // ✅ STOCK REDUCTION - Reduce stock for all items after bill is saved
+
+    // Validate customer info - MOBILE IS NOW MANDATORY
+    const mobile = customerInfo.phone.trim();
+    const name = customerInfo.name.trim() || "Customer";
+
+    if (!mobile) {
+      toast.error('Mobile number is required!');
+      return;
+    }
+
+    if (!/^\d{10}$/.test(mobile)) {
+      toast.error('Please enter a valid 10-digit mobile number');
+      return;
+    }
+
+    const totalAmount = calculateFinalTotal(); // Use final total (with points if applied)
+    const grandTotalBeforePoints = calculateGrandTotal();
+    const paidAmount = Number(paymentAmounts.cash) + Number(paymentAmounts.upi);
+
+    if (paidAmount < totalAmount) {
+      if (!window.confirm(`Paid amount ₹${paidAmount.toFixed(2)} is less than bill total ₹${totalAmount.toFixed(2)}. Proceed and record as due?`)) return;
+    }
+
+    // Prevent double-clicking
+    if (processing) {
+      console.log('⚠️ Already processing payment, ignoring duplicate request');
+      return;
+    }
+
+    setProcessing(true);
+
     try {
-      console.log('📦 Reducing stock for sold items...');
-      
-      const stockUpdatePromises = finalItems.map(async (item) => {
-        // Skip custom products (manually added items)
-        if (item._id && !item._id.toString().startsWith('custom_')) {
-          try {
-            // Update product stock
-            await productService.updateStock(item._id, item.quantity, 'subtract');
-            console.log(`✅ Stock reduced for ${item.name}: -${item.quantity}`);
-            
-            // If product has parent (variant case), update parent stock too
-            const product = products.find(p => p._id === item._id);
-            if (product?.parentProduct) {
-              await productService.updateStock(product.parentProduct, item.quantity, 'subtract');
-              console.log(`✅ Parent stock reduced for ${item.name}: -${item.quantity}`);
+      console.log('✅ Starting bill generation...');
+
+      // Prepare final items for billing
+      const finalItems = [];
+
+      // Get set of cart item IDs that are assigned to combos
+      const assignedCartItemQuantities = new Map();
+      selectedCombos.forEach(combo => {
+        if (combo.slots) {
+          combo.slots.forEach(slot => {
+            if (slot.assigned && slot.assigned.cartItemId) {
+              const cartItemId = slot.assigned.cartItemId;
+              const assignedQty = slot.assigned.qty || 1;
+              assignedCartItemQuantities.set(cartItemId, (assignedCartItemQuantities.get(cartItemId) || 0) + assignedQty);
             }
-          } catch (stockError) {
-            console.warn(`⚠️ Failed to update stock for ${item.name}:`, stockError);
-          }
+          });
         }
       });
-      
-      // Wait for all stock updates to complete
-      await Promise.all(stockUpdatePromises);
-      
-      // Reload products to get updated stock levels
-      const updatedProducts = await productService.getProducts();
-      setProducts(updatedProducts.data || updatedProducts || []);
-      
-      console.log('✅ Stock updated successfully for all items');
-    } catch (stockError) {
-      console.error('⚠️ Stock update failed:', stockError);
-      toast.warning('Bill saved but stock update failed. Please check inventory manually.');
-    }
-    
-    // Show success message
-    toast.success('💾 Bill generated successfully!');
-    
-    // Set bill data for receipt
-    setLastBill(billData);
-    
-    // Ask user about printing
-    const printChoice = window.confirm('💾 Bill generated!\n\n🖨 Click OK to PRINT\n📄 Click Cancel to skip print');
-    
-    if (printChoice) {
-      console.log('🖨 User chose to print');
-      // Small delay to ensure state is updated
+
+      // Add single products
+      cart.forEach(item => {
+        const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
+        const quantityForSingles = Math.max(0, item.quantity - assignedQty);
+
+        if (quantityForSingles > 0) {
+          finalItems.push({
+            ...item,
+            quantity: quantityForSingles,
+            price: item.pricing?.offerPrice || item.price || 0,
+            originalPrice: item.pricing?.mrp || item.price || 0,
+            isComboApplied: false
+          });
+        }
+      });
+
+      // Add combo products with adjusted pricing
+      selectedCombos.forEach(combo => {
+        const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+        if (allSlotsFilled) {
+          combo.slots.forEach(slot => {
+            if (slot.assigned) {
+              const adjustedPrice = calculateAdjustedPrice(combo, slot);
+
+              finalItems.push({
+                ...slot.assigned.product,
+                quantity: slot.assigned.qty,
+                price: adjustedPrice,
+                originalPrice: slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0,
+                isComboApplied: true,
+                appliedComboName: combo.name,
+                comboPrice: adjustedPrice
+              });
+            }
+          });
+        }
+      });
+
+      // Separate items for bill
+      const singlesItems = finalItems.filter(item => !item.isComboApplied);
+      const comboItems = finalItems.filter(item => item.isComboApplied);
+
+      // Create bill data structure
+      const billData = {
+        billNumber: `B${Date.now()}`,
+        transactionId: `TXN${Date.now()}`,
+        date: new Date(),
+        customer: {
+          name: name,
+          phone: mobile
+        },
+        loyalty: (() => {
+          if (mobile && /^\d{10}$/.test(mobile) && walletData) {
+            const currentPoints = walletData.points || 0;
+            let redeemedPoints = 0;
+            let pointValue = 0;
+
+            // Calculate redeemed
+            if (pointsApplied && currentPoints > 0) {
+              const grandTotalBeforePoints = calculateGrandTotal();
+              const maxPointValue = currentPoints * pointPrice;
+              const discountAmount = Math.min(maxPointValue, grandTotalBeforePoints);
+              redeemedPoints = Math.ceil(discountAmount / pointPrice);
+              pointValue = discountAmount;
+            }
+
+            const closingBalance = currentPoints - redeemedPoints + (pointsToEarn || 0);
+
+            return {
+              totalPoints: closingBalance,
+              redeemedPoints: redeemedPoints,
+              pointValue: pointValue
+            };
+          }
+          return null;
+        })(),
+        items: finalItems,
+        singlesItems: singlesItems,
+        comboItems: comboItems,
+        subtotal: calculateSinglesSubtotal(),
+        combosTotal: calculateCombosSubtotal(),
+        total: totalAmount,
+        discount: calculateTotalSavings(),
+        paymentMethod: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? 'mix' :
+          paymentAmounts.cash > 0 ? 'cash' : 'upi',
+        receivedAmount: paidAmount,
+        change: Math.max(0, paidAmount - totalAmount),
+        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
+      };
+
+      console.log('💾 Bill data prepared:', billData);
+
+      // Try to save to backend (optional - don't block printing)
+      try {
+        const paymentData = {
+          customer: {
+            name: name,
+            phone: mobile,
+            email: ''
+          },
+          items: finalItems.map(item => ({
+            product: item._id,
+            productName: item.name,
+            productCode: item.productCode || item.code || 'N/A',
+            quantity: item.quantity,
+            unitPrice: item.price,
+            mrp: item.originalPrice || item.price,
+            totalAmount: item.price * item.quantity,
+            tax: 0,
+            discount: item.isComboApplied ? (item.originalPrice - item.price) : 0,
+            comboAssignment: item.isComboApplied ? {
+              isComboItem: true,
+              comboName: item.appliedComboName
+            } : null
+          })),
+          totals: {
+            subtotal: billData.subtotal + billData.combosTotal,
+            totalTax: 0,
+            totalDiscount: billData.discount,
+            grandTotal: totalAmount,
+            finalAmount: totalAmount
+          },
+          payment: {
+            method: billData.paymentMethod,
+            amount: totalAmount,
+            receivedAmount: paidAmount,
+            changeGiven: billData.change,
+            transactionId: billData.transactionId,
+            status: 'paid',
+            mixPaymentDetails: paymentAmounts.cash > 0 && paymentAmounts.upi > 0 ? {
+              cash: Number(paymentAmounts.cash),
+              upi: Number(paymentAmounts.upi)
+            } : null
+          },
+          status: 'completed'
+        };
+
+        console.log('📤 Sending to backend...');
+        const response = await billingService.createBill(paymentData);
+
+        console.log('📥 Backend response:', response);
+
+        // Update bill number from response if available (support different structures)
+        if (response && (response.data || response.billNumber)) {
+          const responseData = response.data || response;
+          billData.billNumber = responseData.billNumber;
+          billData.transactionId = responseData.transactionId;
+          console.log('✅ Backend save successful:', billData.billNumber);
+        } else {
+          console.warn('⚠️ Unexpected response structure:', response);
+        }
+
+        // ALWAYS handle wallet points after bill creation (moved outside if block check)
+
+        // Handle wallet points after successful bill creation
+        console.log('💰 [Wallet Update] Starting wallet point transaction...');
+        console.log(`   Mobile: ${mobile}`);
+        console.log(`   Points Applied: ${pointsApplied}`);
+        console.log(`   Points to Earn: ${pointsToEarn}`);
+        console.log(`   Wallet Data:`, walletData);
+
+        try {
+          if (mobile && /^\d{10}$/.test(mobile)) {
+            console.log('✅ [Wallet Update] Mobile number valid, proceeding...');
+
+            // Deduct redeemed points if applied
+            if (pointsApplied && walletData && walletData.points > 0) {
+              // Calculate actual discount value used
+              const maxPointValue = walletData.points * pointPrice;
+              const discountAmount = Math.min(maxPointValue, grandTotalBeforePoints);
+
+              // Calculate points to redeem (ceil to ensure we don't undercharge)
+              const pointsRedeemed = Math.ceil(discountAmount / pointPrice);
+
+              console.log(`💳 [Wallet Update] Redeeming ${pointsRedeemed} points (Value: ₹${discountAmount.toFixed(2)})...`);
+              await walletService.updateWalletPoints(
+                mobile,
+                pointsRedeemed,
+                'redeemed',
+                billData.billNumber,
+                grandTotalBeforePoints,
+                `Points redeemed for bill ${billData.billNumber}`,
+                name
+              );
+              console.log(`✅ [Wallet Update] Redeemed ${pointsRedeemed} points successfully`);
+            }
+
+            // Add earned points
+            if (pointsToEarn > 0) {
+              console.log(`💰 [Wallet Update] Adding ${pointsToEarn} earned points...`);
+              await walletService.updateWalletPoints(
+                mobile,
+                pointsToEarn,
+                'earned',
+                billData.billNumber,
+                grandTotalBeforePoints,
+                `Points earned from bill ${billData.billNumber}`,
+                name
+              );
+              console.log(`✅ [Wallet Update] Earned ${pointsToEarn} points successfully`);
+            } else {
+              console.log('⚠️ [Wallet Update] No points to earn (pointsToEarn = 0)');
+            }
+
+            // Refresh wallet data
+            console.log('🔄 [Wallet Update] Refreshing wallet data...');
+            await fetchWalletByPhone(mobile);
+            console.log('✅ [Wallet Update] Wallet refreshed successfully');
+          } else {
+            console.log('❌ [Wallet Update] Invalid mobile number, skipping wallet update');
+          }
+        } catch (walletError) {
+          console.error('❌ [Wallet Update] Wallet update failed:', walletError);
+          console.error('   Error details:', walletError.response?.data || walletError.message);
+          // Don't stop the billing process if wallet fails
+        }
+
+      } catch (backendError) {
+        console.warn('⚠️ Backend save failed, continuing with offline bill:', backendError);
+        // Continue with offline bill - don't stop the process
+      }
+
+      // ✅ STOCK REDUCTION - Reduce stock for all items after bill is saved
+      try {
+        console.log('📦 Reducing stock for sold items...');
+
+        const stockUpdatePromises = finalItems.map(async (item) => {
+          // Skip custom products (manually added items)
+          if (item._id && !item._id.toString().startsWith('custom_')) {
+            try {
+              // Update product stock
+              await productService.updateStock(item._id, item.quantity, 'subtract');
+              console.log(`✅ Stock reduced for ${item.name}: -${item.quantity}`);
+
+              // If product has parent (variant case), update parent stock too
+              const product = products.find(p => p._id === item._id);
+              if (product?.parentProduct) {
+                await productService.updateStock(product.parentProduct, item.quantity, 'subtract');
+                console.log(`✅ Parent stock reduced for ${item.name}: -${item.quantity}`);
+              }
+            } catch (stockError) {
+              console.warn(`⚠️ Failed to update stock for ${item.name}:`, stockError);
+            }
+          }
+        });
+
+        // Wait for all stock updates to complete
+        await Promise.all(stockUpdatePromises);
+
+        // Reload products to get updated stock levels
+        const updatedProducts = await productService.getProducts();
+        setProducts(updatedProducts.data || updatedProducts || []);
+
+        console.log('✅ Stock updated successfully for all items');
+      } catch (stockError) {
+        console.error('⚠️ Stock update failed:', stockError);
+        toast.warning('Bill saved but stock update failed. Please check inventory manually.');
+      }
+
+      // Show success message
+      toast.success('💾 Bill generated successfully!');
+
+      // Set bill data for receipt
+      setLastBill(billData);
+
+      // Ask user about printing
+      const printChoice = window.confirm('💾 Bill generated!\n\n🖨 Click OK to PRINT\n📄 Click Cancel to skip print');
+
+      if (printChoice) {
+        console.log('🖨 User chose to print');
+        // Small delay to ensure state is updated
+        setTimeout(() => {
+          printReceiptWithAutoPrint(billData);
+          toast.success('Bill sent to printer!');
+        }, 200);
+      } else {
+        console.log('📄 User skipped printing');
+        toast('Bill saved (no print)', { icon: 'ℹ️' });
+      }
+
+      // Clear bill after delay
       setTimeout(() => {
-        printReceiptWithAutoPrint(billData);
-        toast.success('Bill sent to printer!');
-      }, 200);
-    } else {
-      console.log('📄 User skipped printing');
-      toast.info('Bill saved (no print)');
+        clearBill();
+        setLastBill(null);
+      }, 1000);
+
+    } catch (error) {
+      console.error('❌ Error in finalizeAndPrint:', error);
+      toast.error('Failed to generate bill: ' + error.message);
+    } finally {
+      setProcessing(false);
     }
-    
-    // Clear bill after delay
-    setTimeout(() => {
-      clearBill();
-      setLastBill(null);
-    }, 1000);
-    
-  } catch (error) {
-    console.error('❌ Error in finalizeAndPrint:', error);
-    toast.error('Failed to generate bill: ' + error.message);
-  } finally {
-    setProcessing(false);
-  }
-};
+  };
 
   // Print receipt with provided data
   const printReceiptWithData = (billData) => {
@@ -1105,21 +1311,21 @@ const finalizeAndPrint = async () => {
       toast.error('Cannot print: No bill data available');
       return;
     }
-    
+
     const receiptHTML = generateReceiptHTML(billData);
-    
+
     if (!receiptHTML) {
       console.error('Failed to generate receipt HTML');
       toast.error('Cannot print: Failed to generate receipt');
       return;
     }
-    
+
     const printWindow = window.open('', '_blank', 'width=800,height=700');
     if (!printWindow) {
       toast.error('Unable to open print window. Popup blocked?');
       return;
     }
-    
+
     printWindow.document.write(receiptHTML);
     printWindow.document.close();
     printWindow.focus();
@@ -1132,27 +1338,27 @@ const finalizeAndPrint = async () => {
       toast.error('Cannot print: No bill data available');
       return;
     }
-    
+
     const receiptHTML = generateReceiptHTML(billData, true); // Pass true for auto-print
-    
+
     if (!receiptHTML) {
       console.error('Failed to generate receipt HTML');
       toast.error('Cannot print: Failed to generate receipt');
       return;
     }
-    
+
     const printWindow = window.open('', '_blank', 'width=800,height=700');
     if (!printWindow) {
       toast.error('❌ Unable to open print window. Please check if popups are blocked.');
       return;
     }
-    
+
     printWindow.document.write(receiptHTML);
     printWindow.document.close();
-    
+
     // Show print status
     const loadingToast = toast.loading('🖨 Preparing to print...');
-    
+
     // Automatically trigger print dialog
     printWindow.onload = () => {
       setTimeout(() => {
@@ -1161,443 +1367,15 @@ const finalizeAndPrint = async () => {
         toast.success('🖨 Print dialog opened! Check your printer.');
       }, 500);
     };
-    
+
     printWindow.focus();
-    
+
     // Dismiss loading toast after timeout as fallback
     setTimeout(() => {
       toast.dismiss(loadingToast);
     }, 3000);
   };
 
-  // Generate receipt HTML
-// Generate receipt HTML
-// Complete generateReceiptHTML function - Copy this ENTIRE function into your React component
-
-const generateReceiptHTML = (bill, autoPrint = false) => {
-  if (!bill) {
-    console.error('No bill data provided to generateReceiptHTML');
-    return '';
-  }
-  
-  const fmt = (val) => `₹${parseFloat(val || 0).toFixed(2)}`;
-  
-  // Calculate GST for individual items based on price threshold
-  const calculateItemGST = (price, quantity) => {
-    if (price > 2500) {
-      // 12% GST for items above 2500
-      const gstRate = 0.12;
-      const baseAmount = (price * quantity) / (1 + gstRate);
-      const totalGST = (price * quantity) - baseAmount;
-      const cgst = totalGST / 2;
-      const sgst = totalGST / 2;
-      
-      return {
-        gstRate: 12,
-        baseAmount: parseFloat(baseAmount.toFixed(2)),
-        cgst: parseFloat(cgst.toFixed(2)),
-        sgst: parseFloat(sgst.toFixed(2)),
-        totalGST: parseFloat(totalGST.toFixed(2))
-      };
-    } else {
-      // 5% GST for items 2500 and below
-      const gstRate = 0.05;
-      const baseAmount = (price * quantity) / (1 + gstRate);
-      const totalGST = (price * quantity) - baseAmount;
-      const cgst = totalGST / 2;
-      const sgst = totalGST / 2;
-      
-      return {
-        gstRate: 5,
-        baseAmount: parseFloat(baseAmount.toFixed(2)),
-        cgst: parseFloat(cgst.toFixed(2)),
-        sgst: parseFloat(sgst.toFixed(2)),
-        totalGST: parseFloat(totalGST.toFixed(2))
-      };
-    }
-  };
-  
-  // Calculate overall GST breakdown for all items
-  const calculateOverallGST = (items) => {
-    let taxable12 = 0;
-    let cgst12 = 0;
-    let sgst12 = 0;
-    
-    let taxable5 = 0;
-    let cgst5 = 0;
-    let sgst5 = 0;
-    
-    items.forEach(item => {
-      // CRITICAL FIX: Use price field which contains adjusted price for combos
-      const price = item.price || item.pricing?.offerPrice || 0;
-      const gst = calculateItemGST(price, item.quantity || 1);
-      
-      if (gst.gstRate === 12) {
-        taxable12 += gst.baseAmount;
-        cgst12 += gst.cgst;
-        sgst12 += gst.sgst;
-      } else {
-        taxable5 += gst.baseAmount;
-        cgst5 += gst.cgst;
-        sgst5 += gst.sgst;
-      }
-    });
-    
-    return {
-      gst12: {
-        taxable: parseFloat(taxable12.toFixed(2)),
-        cgst: parseFloat(cgst12.toFixed(2)),
-        sgst: parseFloat(sgst12.toFixed(2)),
-        total: parseFloat((cgst12 + sgst12).toFixed(2))
-      },
-      gst5: {
-        taxable: parseFloat(taxable5.toFixed(2)),
-        cgst: parseFloat(cgst5.toFixed(2)),
-        sgst: parseFloat(sgst5.toFixed(2)),
-        total: parseFloat((cgst5 + sgst5).toFixed(2))
-      }
-    };
-  };
-  
-  // Calculate actual discount: Total MRP - Total Offer Price (using price field for combo items)
-  const calculateActualDiscount = (items) => {
-    let totalMRP = 0;
-    let totalOffer = 0;
-    
-    items.forEach(item => {
-      const mrp = item.pricing?.mrp || item.originalPrice || 0;
-      // CRITICAL FIX: Use price field which contains adjusted price for combos
-      const offerPrice = item.price || item.pricing?.offerPrice || 0;
-      const qty = item.quantity || 1;
-      
-      totalMRP += mrp * qty;
-      totalOffer += offerPrice * qty;
-    });
-    
-    return parseFloat((totalMRP - totalOffer).toFixed(2));
-  };
-  
-  return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Receipt - ${bill.billNumber}</title>
-        <style>
-          @page {
-            width: 81mm;
-            height: auto;
-            margin: 2mm;
-          }
-          body { 
-            font-family: Arial, sans-serif; 
-            font-size: 11.5px; 
-            font-weight: bold;
-            line-height: 1.2;
-            margin: 0;
-            padding: 3mm 5mm;
-            width: 68mm;
-            color: #000;
-            background: #fff;
-          }
-          .center { text-align: center; }
-          .bold { font-weight: bold; }
-          .large { font-size: 18px; font-weight: bold; }
-          .medium { font-size: 15px; }
-          .small { font-size: 12px; }
-          .divider { 
-            border-top: 1px dashed #000; 
-            margin: 2mm 0; 
-            width: 100%;
-          }
-          .solid-divider {
-            border-top: 1px solid #000; 
-            margin: 1.5mm 0; 
-            width: 100%;
-          }
-          .flex-between { 
-            display: flex; 
-            justify-content: space-between;
-            width: 100%;
-            margin: 0.5mm 0;
-          }
-          .table-header {
-            display: flex;
-            justify-content: space-between;
-            font-weight: bold;
-            font-size: 9.5px;
-            padding: 1.5mm 0;
-            border-top: 1px solid #000;
-            border-bottom: 1px solid #000;
-            margin: 1.5mm 0;
-          }
-          .item-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 11px;
-            padding: 0.5mm 0;
-            line-height: 1.2;
-          }
-          @media print {
-            body { 
-              margin: 0;
-              padding: 3mm 5mm;
-              width: 68mm;
-            }
-            .no-print { display: none; }
-            * { 
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="center">
-          <div class="bold large">VEEDRA THE BRAND</div>
-          <div class="small">Wholesalers in Western Wear,</div>
-          <div class="small">Ethnic Wear & Indo-Western Wear</div>
-          <div class="small">1st Parallel Road, Durgigudi,</div>
-          <div class="small">Shimoga – 577201</div>
-          <div class="small">Mobile: 70262 09627</div>
-          <div class="small">GSTIN: 29GJMPP54227F1Z0</div>
-        </div>
-        
-        <div class="divider"></div>
-        
-        <div class="center bold medium">INVOICE</div>
-        
-        <div style="font-size: 12px; margin-top: 2mm;">
-          <div class="flex-between">
-            <span class="bold">Invoice:</span>
-            <span class="bold">${bill.billNumber}</span>
-          </div>
-          <div class="flex-between">
-            <span class="bold">Date:</span>
-            <span>${new Date(bill.date).toLocaleDateString()}</span>
-          </div>
-          <div class="flex-between">
-            <span class="bold">Time:</span>
-            <span class="bold">${new Date(bill.date).toLocaleTimeString()}</span>
-          </div>
-        </div>
-        
-        ${(bill.customer && (bill.customer.name || bill.customer.phone)) ? `
-        <div style="margin-top: 2mm; font-size: 12px;">
-          <div class="flex-between">
-            <span class="bold">Customer:</span>
-            <span class="bold">${bill.customer.name || 'N/A'}</span>
-          </div>
-          <div class="flex-between">
-            <span class="bold">Mobile:</span>
-            <span>${bill.customer.phone || 'N/A'}</span>
-          </div>
-        </div>
-        ` : ''}
-        
-        <div class="divider"></div>
-        
-        ${bill.combos && bill.combos.length > 0 ? `
-        <div style="font-size: 11px; margin-bottom: 2mm;">
-          <div class="bold">COMBO OFFERS APPLIED:</div>
-          ${(bill.combos || []).map(combo => `
-            <div style="margin: 1.5mm 0; padding: 1.5mm; border: 1px dashed #666;">
-              <div class="bold">${combo.name}</div>
-              <div style="font-size: 10px;">Total: ₹${combo.offerPrice}</div>
-            </div>
-          `).join('')}
-        </div>
-        <div class="divider"></div>
-        ` : ''}
-        
-        <div class="table-header">
-          <span style="width: 20mm;">NAME</span>
-          <span style="width: 9mm;">MRP</span>
-          <span style="width: 6mm;">QTY</span>
-          <span style="width: 9mm;">OFFER</span>
-          <span style="width: 11mm;">AMT</span>
-        </div>
-        
-        ${bill.singlesItems && bill.singlesItems.length > 0 ? 
-          (bill.singlesItems || []).map((item, index) => {
-            const mrp = item.pricing?.mrp || item.originalPrice || 0;
-            const offerPrice = item.price || item.pricing?.offerPrice || 0;
-            return `
-          <div class="item-row">
-            <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
-              ${item.name}
-            </span>
-            <span style="width: 9mm;">${fmt(mrp)}</span>
-            <span style="width: 6mm; text-align: right;">${item.quantity}</span>
-            <span style="width: 9mm; font-weight: bold;">${fmt(offerPrice)}</span>
-            <span style="width: 11mm; font-weight: bold;">${fmt(offerPrice * item.quantity)}</span>
-          </div>
-        `;}).join('') : ''}
-
-        ${bill.comboItems && bill.comboItems.length > 0 ? 
-          (bill.comboItems || []).map((item, index) => {
-            // CRITICAL FIX: Use price field which contains the adjusted price
-            const adjustedPrice = item.price || item.comboPrice || item.adjustedPrice || 0;
-            const originalMRP = item.pricing?.mrp || item.originalPrice || 0;
-            
-            return `
-          <div class="item-row">
-            <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
-              ${item.name}
-            </span>
-            <span style="width: 9mm;">${fmt(originalMRP)}</span>
-            <span style="width: 6mm; text-align: right;">${item.quantity}</span>
-            <span style="width: 9mm; font-weight: bold;">${fmt(adjustedPrice)}</span>
-            <span style="width: 11mm; font-weight: bold;">${fmt(adjustedPrice * item.quantity)}</span>
-          </div>
-        `;}).join('') : ''}
-        
-        <div class="solid-divider"></div>
-        
-        <div style="font-size: 12px; margin-top: 2mm;">
-          ${(() => {
-            const allItems = [
-              ...(bill.singlesItems || []),
-              ...(bill.comboItems || [])
-            ];
-            const totalItems = allItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
-            const gstBreakdown = calculateOverallGST(allItems);
-            
-            // Calculate actual discount
-            const actualDiscount = calculateActualDiscount(allItems);
-            
-            // Calculate total MRP
-            const totalMRP = allItems.reduce((sum, item) => {
-              const mrp = item.pricing?.mrp || item.originalPrice || 0;
-              const qty = item.quantity || 1;
-              return sum + (mrp * qty);
-            }, 0);
-            
-            return `
-              <div class="flex-between">
-                <span>Total Items:</span>
-                <span class="bold">${allItems.length}</span>
-              </div>
-              <div class="flex-between">
-                <span>Item Qty:</span>
-                <span class="bold">${totalItems}</span>
-              </div>
-              <div class="solid-divider" style="margin: 2mm 0;"></div>
-              <div class="flex-between">
-                <span class="bold">Total MRP:</span>
-                <span class="bold">${fmt(totalMRP)}</span>
-              </div>
-              <div class="flex-between" style="color: #000000;">
-                <span>Discount:</span>
-                <span class="bold">- ${fmt(actualDiscount)}</span>
-              </div>
-              <div class="solid-divider"></div>
-              <div class="flex-between bold" style="font-size: 15px;">
-                <span>Net Payable:</span>
-                <span>${fmt(bill.total)}</span>
-              </div>
-              <div class="divider"></div>
-              <div class="flex-between">
-                <span class="bold">Given Amount:</span>
-                <span class="bold">${fmt(bill.receivedAmount)}</span>
-              </div>
-              <div class="flex-between">
-                <span>Return Amount:</span>
-                <span class="bold">${fmt(bill.change)}</span>
-              </div>
-              <div class="divider"></div>
-              <div class="center bold small">TAX SUMMARY</div>
-              <div style="font-size: 10px; margin-top: 1.5mm;">
-                <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 1mm;">
-                  <span style="width: 12mm;">Tax %</span>
-                  <span style="width: 14mm;">Taxable</span>
-                  <span style="width: 10mm;">SGST</span>
-                  <span style="width: 10mm;">CGST</span>
-                  <span style="width: 12mm;">GST</span>
-                </div>
-                <div class="solid-divider" style="margin: 1mm 0;"></div>
-                ${gstBreakdown.gst12.total > 0 ? `
-                  <div style="display: flex; justify-content: space-between;">
-                    <span style="width: 12mm; font-weight: bold;">12%</span>
-                    <span style="width: 14mm;">${fmt(gstBreakdown.gst12.taxable)}</span>
-                    <span style="width: 10mm; font-weight: bold;">${fmt(gstBreakdown.gst12.sgst)}</span>
-                    <span style="width: 10mm;">${fmt(gstBreakdown.gst12.cgst)}</span>
-                    <span style="width: 12mm; font-weight: bold;">${fmt(gstBreakdown.gst12.total)}</span>
-                  </div>
-                ` : ''}
-                ${gstBreakdown.gst5.total > 0 ? `
-                  <div style="display: flex; justify-content: space-between; ${gstBreakdown.gst12.total > 0 ? 'margin-top: 1mm;' : ''}">
-                    <span style="width: 12mm; font-weight: bold;">5%</span>
-                    <span style="width: 14mm;">${fmt(gstBreakdown.gst5.taxable)}</span>
-                    <span style="width: 10mm; font-weight: bold;">${fmt(gstBreakdown.gst5.sgst)}</span>
-                    <span style="width: 10mm;">${fmt(gstBreakdown.gst5.cgst)}</span>
-                    <span style="width: 12mm; font-weight: bold;">${fmt(gstBreakdown.gst5.total)}</span>
-                  </div>
-                ` : ''}
-              </div>
-            `;
-          })()}
-        </div>
-        
-        <div class="divider"></div>
-        
-        <div style="font-size: 12px;">
-          <div class="flex-between">
-            <span class="bold">Payment:</span>
-            <span>${(bill.paymentMethod || 'cash').toUpperCase()}</span>
-          </div>
-        </div>
-        
-        <div class="divider"></div>
-        
-        <div class="center">
-          <div class="bold small">Terms & Conditions</div>
-          <div style="font-size: 11px; margin-top: 1.5mm;">
-            <div>No Exchange, No Return, No Guarantee.</div>
-            <div>Please verify items before leaving.</div>
-            <div>Working Hours: 8:00 AM – 9:00 PM</div>
-            <div style="margin-top: 1mm; font-style: italic;">*GST: 5% (≤₹2500) | 12% (>₹2500)</div>
-          </div>
-        </div>
-        
-        <div class="divider"></div>
-        
-        <div class="center">
-          <div class="bold medium">Thank You for Shopping at</div>
-          <div class="bold medium">VEEDRA THE BRAND</div>
-          <div class="small">Best Prices in Shimoga</div>
-          <div class="small">Wholesale & Retail Available!</div>
-        </div>
-        
-        ${autoPrint ? `
-        <div class="no-print center" style="margin-top: 20px;">
-          <div style="color: #28a745; font-weight: bold; margin-bottom: 10px;">
-            📄 Printing... Please check your printer
-          </div>
-          <button onclick="window.print();" 
-                  style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
-            🖨 Print Again
-          </button>
-          <button onclick="window.close();" 
-                  style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px; font-weight: bold;">
-            ✕ Close
-          </button>
-        </div>
-        ` : `
-        <div class="no-print center" style="margin-top: 20px;">
-          <button onclick="window.print(); window.close();" 
-                  style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
-            🖨 Print Receipt
-          </button>
-          <button onclick="window.close();" 
-                  style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px; font-weight: bold;">
-            ✕ Close
-          </button>
-        </div>
-        `}
-      </body>
-    </html>
-  `;
-};
   // Print receipt - matches reference formatting (legacy function for preview)
   const printReceipt = () => {
     if (!lastBill) return;
@@ -1677,7 +1455,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
               Combo Offers
             </h3>
             <div className="space-y-3">
-              <select 
+              <select
                 className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors bg-white"
                 value=""
                 onChange={(e) => {
@@ -1724,15 +1502,14 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 const assignedCount = combo.slots?.filter(slot => slot.assigned).length || 0;
                 const totalSlots = combo.slots?.length || 0;
                 const progressPercent = totalSlots > 0 ? (assignedCount / totalSlots) * 100 : 0;
-                
+
                 return (
-                  <div key={index} className={`rounded-lg p-3 mb-3 border-2 transition-all duration-200 ${
-                    allSlotsFilled 
-                      ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-300' 
-                      : assignedCount > 0 
-                        ? 'bg-gradient-to-r from-yellow-50 to-amber-50 border-yellow-300'
-                        : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-300'
-                  }`}>
+                  <div key={index} className={`rounded-lg p-3 mb-3 border-2 transition-all duration-200 ${allSlotsFilled
+                    ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-300'
+                    : assignedCount > 0
+                      ? 'bg-gradient-to-r from-yellow-50 to-amber-50 border-yellow-300'
+                      : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-300'
+                    }`}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex-1">
                         <div className="font-bold text-sm text-gray-800 flex items-center">
@@ -1746,7 +1523,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                         <div className={`text-xs font-bold ${allSlotsFilled ? 'text-green-700' : assignedCount > 0 ? 'text-yellow-700' : 'text-blue-700'}`}>
                           {allSlotsFilled ? '🎉 Complete!' : `${assignedCount}/${totalSlots} items`}
                         </div>
-                        <button 
+                        <button
                           onClick={() => removeComboInstance(combo)}
                           className="mt-1 px-2 py-1 bg-red-500 text-white text-xs rounded-md hover:bg-red-600 transition-colors"
                         >
@@ -1754,7 +1531,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                         </button>
                       </div>
                     </div>
-                    
+
                     {/* Progress Bar */}
                     <div className="mb-2">
                       <div className="flex justify-between text-xs text-gray-600 mb-1">
@@ -1762,35 +1539,32 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                         <span>{Math.round(progressPercent)}%</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className={`h-2 rounded-full transition-all duration-300 ${
-                            allSlotsFilled ? 'bg-green-500' : 'bg-blue-500'
-                          }`}
+                        <div
+                          className={`h-2 rounded-full transition-all duration-300 ${allSlotsFilled ? 'bg-green-500' : 'bg-blue-500'
+                            }`}
                           style={{ width: `${progressPercent}%` }}
                         ></div>
                       </div>
                     </div>
-                    
+
                     {/* Slots display */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-2">
                       {combo.slots?.map((slot, slotIndex) => {
-                        const priceRange = (slot.minPrice || slot.maxPrice) ? 
+                        const priceRange = (slot.minPrice || slot.maxPrice) ?
                           `₹${fmt(slot.minPrice)}-${fmt(slot.maxPrice)}` : "Any Price";
-                        
+
                         return (
-                          <div 
-                            key={slotIndex} 
-                            className={`p-2 rounded-lg border-2 transition-all duration-200 ${
-                              slot.assigned 
-                                ? 'bg-green-100 border-green-400 shadow-sm' 
-                                : 'bg-white border-dashed border-blue-300 hover:border-blue-400'
-                            }`}
+                          <div
+                            key={slotIndex}
+                            className={`p-2 rounded-lg border-2 transition-all duration-200 ${slot.assigned
+                              ? 'bg-green-100 border-green-400 shadow-sm'
+                              : 'bg-white border-dashed border-blue-300 hover:border-blue-400'
+                              }`}
                           >
                             <div className="flex items-center justify-between mb-1">
                               <span className="font-bold text-xs text-gray-700">Slot {slotIndex + 1}</span>
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                slot.assigned ? 'bg-green-200 text-green-800' : 'bg-blue-100 text-blue-700'
-                              }`}>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${slot.assigned ? 'bg-green-200 text-green-800' : 'bg-blue-100 text-blue-700'
+                                }`}>
                                 {slot.assigned ? '✓' : '○'}
                               </span>
                             </div>
@@ -1815,6 +1589,63 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
               })}
             </div>
           </div>
+
+          {/* Available Points Section */}
+          {customerInfo.phone && /^\d{10}$/.test(customerInfo.phone) && (
+            <div className="mb-4 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-200">
+              <h3 className="font-bold text-gray-800 mb-3 flex items-center">
+                <span className="bg-purple-100 text-purple-800 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mr-2">💰</span>
+                Wallet Points
+              </h3>
+
+              {loadingWallet ? (
+                <div className="text-center py-2 text-gray-500 text-sm">Loading wallet...</div>
+              ) : walletData ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-white rounded-lg p-3 border border-purple-100">
+                      <div className="text-xs text-gray-600 mb-1">Available Points</div>
+                      <div className="text-lg font-bold text-purple-700">
+                        {walletData.points} pts
+                      </div>
+                      <div className="text-sm font-semibold text-green-600">= ₹{(walletData.points * pointPrice).toFixed(2)}</div>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border border-green-100">
+                      <div className="text-xs text-gray-600 mb-1">Will Earn</div>
+                      <div className="text-lg font-bold text-green-700">
+                        +{pointsToEarn} pts
+                      </div>
+                      <div className="text-sm font-semibold text-green-600">= ₹{(pointsToEarn * pointPrice).toFixed(2)}</div>
+                    </div>
+                  </div>
+
+                  {walletData.points > 0 && (
+                    <button
+                      onClick={togglePointRedemption}
+                      className={`w-full py-3 rounded-lg font-medium transition-all ${pointsApplied
+                        ? 'bg-red-500 hover:bg-red-600 text-white'
+                        : 'bg-purple-600 hover:bg-purple-700 text-white'
+                        }`}
+                    >
+                      {pointsApplied ? '✕ Remove Points' : '✓ Apply Points'}
+                    </button>
+                  )}
+
+                  {pointsApplied && (
+                    <div className="bg-green-100 border border-green-300 rounded-lg p-2 text-center">
+                      <span className="text-green-800 font-medium text-sm">
+                        💚 Discount Applied: ₹{(Math.min(walletData.points * pointPrice, calculateGrandTotal())).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-2 text-gray-500 text-sm">
+                  Enter mobile number to view wallet
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Product Scanner Section */}
           <div className="mb-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 border border-blue-100">
@@ -1841,10 +1672,10 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                   onChange={(e) => setQtyInput(Math.max(1, parseInt(e.target.value) || 1))}
                   className="w-20 p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors bg-white"
                 />
-                <button 
+                <button
                   onClick={() => {
                     if (barcodeInput.trim()) {
-                      handleBarcodeInput({ key: 'Enter', preventDefault: () => {} });
+                      handleBarcodeInput({ key: 'Enter', preventDefault: () => { } });
                     }
                   }}
                   className="px-4 py-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
@@ -1852,12 +1683,12 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                   Add
                 </button>
               </div>
-              
+
               <div className="flex gap-3 items-center bg-white p-2 rounded-lg border border-gray-200">
-                <div 
+                <div
                   ref={scannerRef}
                   id="scanner_ref"
-                  className="rounded-lg overflow-hidden relative bg-gray-900 flex items-center justify-center text-white text-xs shadow-inner" 
+                  className="rounded-lg overflow-hidden relative bg-gray-900 flex items-center justify-center text-white text-xs shadow-inner"
                   style={{ width: '120px', height: '90px' }}
                 >
                   {!isScanning && (
@@ -1878,7 +1709,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <div className="flex-1 space-y-2">
                   {!isScanning ? (
                     <>
-                      <button 
+                      <button
                         onClick={startCameraScanning}
                         disabled={!!cameraError}
                         className="w-full px-3 py-2 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
@@ -1886,7 +1717,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                         📷 Start Camera
                       </button>
                       {cameraError && cameraError.includes('denied') && (
-                        <button 
+                        <button
                           onClick={requestCameraPermission}
                           className="w-full px-3 py-2 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700"
                         >
@@ -1895,7 +1726,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                       )}
                     </>
                   ) : (
-                    <button 
+                    <button
                       onClick={stopCameraScanning}
                       className="w-full px-3 py-2 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700 font-medium"
                     >
@@ -1930,7 +1761,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium">{fmt(item.price)} × {item.quantity}</span>
-                    <button 
+                    <button
                       onClick={() => removeFromCart(item._id)}
                       className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded-md hover:bg-red-200 transition-colors"
                     >
@@ -1948,7 +1779,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           </div>
 
           <div className="mt-6">
-            <button 
+            <button
               onClick={clearBill}
               className="w-full px-4 py-3 text-sm bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-lg hover:from-gray-700 hover:to-gray-800 transition-all duration-200 font-medium shadow-md"
             >
@@ -1965,7 +1796,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
               {(cart.length + selectedCombos.length)} items
             </div>
           </div>
-          
+
           <div>
             {/* Combos Summary */}
             <div className="mb-3">
@@ -1981,7 +1812,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                       }, 0);
                       return Math.max(0, sumMRP - Number(combo.offerPrice || 0));
                     })() : 0;
-                    
+
                     return (
                       <div key={`${combo._id}-${index}`} className="text-sm p-2 border-b border-dashed border-gray-300 mb-2">
                         <div className="flex justify-between items-center">
@@ -2053,7 +1884,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                         <div className="text-xs font-bold">{fmt(item.price * singlesQty)}</div>
                       </td>
                       <td className="border border-gray-300 p-1">
-                        <button 
+                        <button
                           onClick={() => removeFromCart(item._id)}
                           className="px-2 py-1 bg-teal-600 text-white text-xs rounded hover:bg-teal-700"
                         >
@@ -2155,19 +1986,19 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                   <span className="text-gray-600">Combos Total:</span>
                   <span className="font-medium">{fmt(calculateCombosSubtotal())}</span>
                 </div>
-                
+
                 {/* GST Breakdown */}
                 {(() => {
                   const grandTotal = calculateGrandTotal();
                   if (grandTotal > 0) {
                     const allItems = [
                       ...cart.map(item => ({ price: item.price, quantity: item.quantity })),
-                      ...selectedCombos.flatMap(combo => 
+                      ...selectedCombos.flatMap(combo =>
                         (combo.items || []).map(item => ({ price: item.offerPrice || item.price, quantity: item.quantity }))
                       )
                     ];
                     const gstBreakdown = calculateGSTBreakdown(grandTotal, allItems);
-                    
+
                     return (
                       <div className="border-t border-gray-200 pt-2 mt-3 space-y-1">
                         <div className="flex justify-between text-sm">
@@ -2187,11 +2018,20 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                   }
                   return null;
                 })()}
-                
+
+                {pointsApplied && walletData && (
+                  <div className="border-t border-gray-200 pt-2 mt-3 space-y-1">
+                    <div className="flex justify-between text-sm text-green-700">
+                      <span>Points Redeemed:</span>
+                      <span>- {fmt(Math.min(walletData.points * pointPrice, calculateGrandTotal()))}</span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="border-t border-blue-200 pt-2 mt-3">
                   <div className="flex justify-between text-xl font-bold">
-                    <span className="text-gray-800">GRAND TOTAL:</span>
-                    <span className="text-blue-700">{fmt(calculateGrandTotal())}</span>
+                    <span className="text-gray-800">{pointsApplied ? 'NET PAYABLE:' : 'GRAND TOTAL:'}</span>
+                    <span className="text-blue-700">{fmt(calculateFinalTotal())}</span>
                   </div>
                 </div>
                 {calculateTotalSavings() > 0 && (
@@ -2219,10 +2059,10 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                     <div className="text-sm font-medium text-gray-700 mb-1 flex items-center">
                       💵 Cash Amount
                     </div>
-                    <input 
-                      type="number" 
-                      min="0" 
-                      value={paymentAmounts.cash || ''} 
+                    <input
+                      type="number"
+                      min="0"
+                      value={paymentAmounts.cash || ''}
                       onChange={(e) => setPaymentAmounts(prev => ({ ...prev, cash: Number(e.target.value) || 0 }))}
                       className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
                       placeholder="0.00"
@@ -2232,17 +2072,17 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                     <div className="text-sm font-medium text-gray-700 mb-1 flex items-center">
                       📱 UPI Amount
                     </div>
-                    <input 
-                      type="number" 
-                      min="0" 
-                      value={paymentAmounts.upi || ''} 
+                    <input
+                      type="number"
+                      min="0"
+                      value={paymentAmounts.upi || ''}
                       onChange={(e) => setPaymentAmounts(prev => ({ ...prev, upi: Number(e.target.value) || 0 }))}
                       className="w-full p-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
                       placeholder="0.00"
                     />
                   </label>
                 </div>
-                
+
                 <div className="bg-white rounded-lg p-3 border border-gray-200">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-sm font-medium text-gray-600">Total Paid:</span>
@@ -2250,10 +2090,10 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium text-gray-600">
-                      {((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) >= calculateGrandTotal() ? 'Change:' : 'Due:'}
+                      {((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) >= calculateFinalTotal() ? 'Change:' : 'Due:'}
                     </span>
-                    <span className={`text-lg font-bold ${((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) >= calculateGrandTotal() ? 'text-green-600' : 'text-red-600'}`}>
-                      ₹{Math.abs(((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) - calculateGrandTotal()).toFixed(2)}
+                    <span className={`text-lg font-bold ${((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) >= calculateFinalTotal() ? 'text-green-600' : 'text-red-600'}`}>
+                      ₹{Math.abs(((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) - calculateFinalTotal()).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -2266,11 +2106,11 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                   >
                     {processing ? '⏳ Processing...' : '✅ Finalize & Print'}
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       // Create preview bill with combo items
                       const previewItems = [];
-                      
+
                       // Get set of cart item IDs that are assigned to combos
                       const assignedCartItemIds = new Set();
                       selectedCombos.forEach(combo => {
@@ -2282,14 +2122,14 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                           });
                         }
                       });
-                      
+
                       // Add single products (considering cart item assignments)
                       cart.forEach(item => {
                         // If this cart item is assigned to a combo, reduce quantity by 1
-                        const quantityForSingles = assignedCartItemIds.has(item.cartItemId) 
+                        const quantityForSingles = assignedCartItemIds.has(item.cartItemId)
                           ? Math.max(0, item.quantity - 1)  // Reduce by 1 for combo assignment
-                          : item.quantity; 
-                        
+                          : item.quantity;
+
                         if (quantityForSingles > 0) {
                           previewItems.push({
                             ...item,
@@ -2300,7 +2140,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                           });
                         }
                       });
-                      
+
                       // Add combo products
                       selectedCombos.forEach(combo => {
                         const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
@@ -2310,7 +2150,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                               // Use the calculateAdjustedPrice function for consistency
                               const adjustedPrice = calculateAdjustedPrice(combo, slot);
                               const originalPrice = Number(slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0);
-                              
+
                               previewItems.push({
                                 ...slot.assigned.product,
                                 quantity: slot.assigned.qty,
@@ -2340,14 +2180,14 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                         combosTotal: calculateCombosSubtotal(),
                         tax: 0,
                         discount: calculateTotalSavings(),
-                        total: calculateGrandTotal(),
-                        paymentMethod: (paymentAmounts.cash > 0 && paymentAmounts.upi > 0) ? 'mix' : 
-                                     paymentAmounts.cash > 0 ? 'cash' : 'upi',
+                        total: calculateFinalTotal(),
+                        paymentMethod: (paymentAmounts.cash > 0 && paymentAmounts.upi > 0) ? 'mix' :
+                          paymentAmounts.cash > 0 ? 'cash' : 'upi',
                         receivedAmount: (paymentAmounts.cash || 0) + (paymentAmounts.upi || 0),
-                        change: Math.max(0, ((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) - calculateGrandTotal()),
+                        change: Math.max(0, ((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) - calculateFinalTotal()),
                         combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
                       };
-                      
+
                       printReceiptWithData(previewBill);
                     }}
                     className="px-4 py-3 text-sm bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-lg hover:from-gray-700 hover:to-gray-800 transition-all duration-200 font-medium"
@@ -2370,7 +2210,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span className="bg-blue-100 text-blue-800 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mr-3">🔍</span>
                 Search Results ({filteredProducts.length} found)
               </h4>
-              <button 
+              <button
                 onClick={() => setSearchTerm('')}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >

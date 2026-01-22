@@ -54,10 +54,10 @@ const WalletsPage = () => {
           amount: wallet.balance || 0,
           description: 'Manual payout'
         });
-        
+
         // Show success message
         alert(`✅ Payout processed successfully! ₹${(wallet.balance || 0).toLocaleString()} paid to ${wallet.name}`);
-        
+
         // Reload wallets to get updated data
         await loadWallets();
         console.log('Payout processed successfully:', response);
@@ -154,17 +154,15 @@ const WalletsPage = () => {
               <div className="flex justify-between items-start">
                 <div>
                   <div className="flex items-center">
-                    <Wallet className={`h-5 w-5 mr-2 ${
-                      wallet.type === 'vendor' ? 'text-blue-600' : 'text-purple-600'
-                    }`} />
+                    <Wallet className={`h-5 w-5 mr-2 ${wallet.type === 'vendor' ? 'text-blue-600' : 'text-purple-600'
+                      }`} />
                     <CardTitle className="text-lg">{wallet.name}</CardTitle>
                   </div>
                   <p className="text-sm text-gray-600">{wallet.email}</p>
-                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full mt-2 ${
-                    wallet.type === 'vendor' 
-                      ? 'bg-blue-100 text-blue-800' 
+                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full mt-2 ${wallet.type === 'vendor'
+                      ? 'bg-blue-100 text-blue-800'
                       : 'bg-purple-100 text-purple-800'
-                  }`}>
+                    }`}>
                     {wallet.type.charAt(0).toUpperCase() + wallet.type.slice(1)}
                   </span>
                 </div>
@@ -195,7 +193,7 @@ const WalletsPage = () => {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-600">Commission Rate</p>
@@ -208,18 +206,18 @@ const WalletsPage = () => {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="pt-3 border-t">
                   <div className="flex justify-between items-center mb-2">
                     <p className="text-sm text-gray-600">Last Payout:</p>
                     <p className="text-sm font-medium">
-                      {wallet.lastTransaction 
+                      {wallet.lastTransaction
                         ? new Date(wallet.lastTransaction).toLocaleDateString()
                         : 'Never'
                       }
                     </p>
                   </div>
-                  
+
                   <button
                     onClick={() => handlePayout(wallet)}
                     disabled={(wallet.balance || 0) <= 0}
@@ -248,7 +246,7 @@ const WalletsPage = () => {
                   ×
                 </button>
               </div>
-              
+
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
                   <div className="text-center">
@@ -270,7 +268,7 @@ const WalletsPage = () => {
                     <p className="text-sm text-gray-600">Total Earned</p>
                   </div>
                 </div>
-                
+
                 <div>
                   <h4 className="text-md font-medium mb-3">Recent Transactions</h4>
                   <div className="border rounded-lg">
@@ -282,9 +280,8 @@ const WalletsPage = () => {
                             {new Date(transaction.date).toLocaleDateString()}
                           </p>
                         </div>
-                        <div className={`text-right font-semibold ${
-                          transaction.amount > 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
+                        <div className={`text-right font-semibold ${transaction.amount > 0 ? 'text-green-600' : 'text-red-600'
+                          }`}>
                           {transaction.amount > 0 ? '+' : ''}₹{Math.abs(transaction.amount).toLocaleString()}
                         </div>
                       </div>
@@ -292,7 +289,7 @@ const WalletsPage = () => {
                   </div>
                 </div>
               </div>
-              
+
               <div className="flex justify-end space-x-3 mt-6 pt-4 border-t">
                 <button
                   onClick={() => setShowDetails(false)}

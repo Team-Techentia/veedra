@@ -30,6 +30,12 @@ const productService = {
     return response.data
   },
 
+  // Update stock
+  updateStock: async (id, quantity, type) => {
+    const response = await api.post(`/products/${id}/stock`, { quantity, type })
+    return response.data
+  },
+
   // Delete product
   deleteProduct: async (id) => {
     const response = await api.delete(`/products/${id}`)

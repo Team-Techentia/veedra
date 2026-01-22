@@ -39,21 +39,21 @@ const Layout = () => {
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: Home, roles: ['owner', 'manager', 'staff'] },
-    { 
-      name: 'POS System', 
-      href: '/billing', 
-      icon: CreditCard, 
-      roles: ['owner', 'manager', 'staff'], 
+    {
+      name: 'POS System',
+      href: '/billing',
+      icon: CreditCard,
+      roles: ['owner', 'manager', 'staff'],
       highlight: true,
       children: [
         { name: 'New Bill', href: '/billing' },
         { name: 'Bill History', href: '/billing/history' }
       ]
     },
-    { 
-      name: 'Products', 
-      href: '/products', 
-      icon: Package, 
+    {
+      name: 'Products',
+      href: '/products',
+      icon: Package,
       roles: ['owner', 'manager'],
       children: [
         { name: 'View Products', href: '/products' },
@@ -64,6 +64,7 @@ const Layout = () => {
     { name: 'Categories', href: '/categories', icon: Building2, roles: ['owner', 'manager'] },
     { name: 'Vendors', href: '/vendors', icon: Users, roles: ['owner', 'manager'] },
     { name: 'Combos', href: '/combos', icon: Gift, roles: ['owner', 'manager'] },
+    { name: 'Wallet', href: '/points', icon: Wallet, roles: ['owner', 'manager'] },
     // { name: 'Inventory', href: '/inventory', icon: Package, roles: ['owner', 'manager'] },
     // { name: 'Wallets', href: '/wallets', icon: Wallet, roles: ['owner', 'manager'] },
     // { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['owner', 'manager'] },
@@ -71,7 +72,7 @@ const Layout = () => {
     // { name: 'Settings', href: '/settings', icon: Settings, roles: ['owner', 'manager', 'staff'] },
   ];
 
-  const filteredNavigation = navigation.filter(item => 
+  const filteredNavigation = navigation.filter(item =>
     item.roles.includes(user?.role)
   );
 
@@ -102,7 +103,7 @@ const Layout = () => {
               {filteredNavigation.map((item) => {
                 const Icon = item.icon;
                 const hasChildren = item.children && item.children.length > 0;
-                
+
                 return (
                   <div key={item.name} className="relative">
                     <button
@@ -114,15 +115,14 @@ const Layout = () => {
                           setDropdownOpen(null);
                         }
                       }}
-                      className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                        isActive(item.href)
-                          ? item.highlight 
-                            ? 'bg-green-100 text-green-900 border border-green-300' 
-                            : 'bg-blue-100 text-blue-900'
-                          : item.highlight
-                            ? 'text-green-700 hover:bg-green-50 hover:text-green-900'
-                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                      }`}
+                      className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${isActive(item.href)
+                        ? item.highlight
+                          ? 'bg-green-100 text-green-900 border border-green-300'
+                          : 'bg-blue-100 text-blue-900'
+                        : item.highlight
+                          ? 'text-green-700 hover:bg-green-50 hover:text-green-900'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        }`}
                     >
                       <Icon className="mr-2 h-4 w-4" />
                       {item.name}
@@ -159,7 +159,7 @@ const Layout = () => {
                 <p className="text-sm font-medium text-gray-900">{user?.name}</p>
                 <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
               </div>
-              
+
               <button
                 onClick={handleLogout}
                 className="flex items-center p-2 text-gray-400 hover:text-gray-600 transition-colors"
@@ -193,20 +193,19 @@ const Layout = () => {
                         navigate(item.href);
                         setMobileMenuOpen(false);
                       }}
-                      className={`group flex items-center px-3 py-2 text-base font-medium rounded-md w-full text-left ${
-                        isActive(item.href)
-                          ? item.highlight 
-                            ? 'bg-green-100 text-green-900' 
-                            : 'bg-blue-100 text-blue-900'
-                          : item.highlight
-                            ? 'text-green-700 hover:bg-green-50'
-                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                      }`}
+                      className={`group flex items-center px-3 py-2 text-base font-medium rounded-md w-full text-left ${isActive(item.href)
+                        ? item.highlight
+                          ? 'bg-green-100 text-green-900'
+                          : 'bg-blue-100 text-blue-900'
+                        : item.highlight
+                          ? 'text-green-700 hover:bg-green-50'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        }`}
                     >
                       <Icon className="mr-3 h-5 w-5" />
                       {item.name}
                     </button>
-                    
+
                     {/* Mobile dropdown items */}
                     {item.children && (
                       <div className="ml-8 space-y-1">
@@ -228,7 +227,7 @@ const Layout = () => {
                 );
               })}
             </div>
-            
+
             {/* Mobile user info */}
             <div className="border-t border-gray-200 px-4 py-3">
               <div className="text-base font-medium text-gray-800">{user?.name}</div>

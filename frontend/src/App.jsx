@@ -42,6 +42,7 @@ import ReportsPage from './pages/reports/ReportsPage'
 
 // Wallets
 import WalletsPage from './pages/wallets/WalletsPage'
+import WalletSettings from './pages/wallets/WalletSettings'
 
 // Settings
 import SettingsPage from './pages/settings/SettingsPage'
@@ -52,7 +53,7 @@ function App() {
 
   const getDashboardComponent = () => {
     if (!user) return <Navigate to="/login" replace />
-    
+
     switch (user.role) {
       case 'owner':
         return <OwnerDashboard />
@@ -69,18 +70,18 @@ function App() {
     <div className="min-h-screen bg-background">
       <Routes>
         {/* Public Routes */}
-        <Route 
-          path="/login" 
+        <Route
+          path="/login"
           element={
             isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />
-          } 
+          }
         />
-        
+
         {/* Protected Routes */}
         <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={getDashboardComponent()} />
-          
+
           {/* Product Management - Manager/Owner */}
           <Route path="products" element={
             <ProtectedRoute allowedRoles={['owner', 'manager']}>
@@ -132,7 +133,7 @@ function App() {
               <AddVendorPage />
             </ProtectedRoute>
           } />
-          
+
           {/* Combo Management - Manager/Owner */}
           <Route path="combos" element={
             <ProtectedRoute allowedRoles={['owner', 'manager']}>
@@ -149,7 +150,7 @@ function App() {
               <EditComboPage />
             </ProtectedRoute>
           } />
-          
+
           {/* Billing - All Roles */}
           <Route path="billing" element={
             <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
@@ -166,7 +167,7 @@ function App() {
               <BillHistoryPage />
             </ProtectedRoute>
           } />
-          
+
           {/* Inventory - Manager/Owner */}
           <Route path="inventory" element={
             <ProtectedRoute allowedRoles={['owner', 'manager']}>
@@ -178,28 +179,35 @@ function App() {
               <StockAdjustmentPage />
             </ProtectedRoute>
           } />
-          
+
           {/* Reports - Role-based access */}
           <Route path="reports" element={
             <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
               <ReportsPage />
             </ProtectedRoute>
           } />
-          
+
           {/* Wallets - All Roles (filtered by backend) */}
           <Route path="wallets" element={
             <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
               <WalletsPage />
             </ProtectedRoute>
           } />
-          
+
+          {/* Wallet Point Settings - Owner/Manager Only */}
+          <Route path="points" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager']}>
+              <WalletSettings />
+            </ProtectedRoute>
+          } />
+
           {/* User Management - Owner Only */}
           <Route path="users" element={
             <ProtectedRoute allowedRoles={['owner']}>
               <UsersPage />
             </ProtectedRoute>
           } />
-          
+
           {/* Settings - All Roles */}
           <Route path="settings" element={
             <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
@@ -207,7 +215,7 @@ function App() {
             </ProtectedRoute>
           } />
         </Route>
-        
+
         {/* Catch all route */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

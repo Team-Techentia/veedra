@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Ca
 import { Search, Filter, Calendar, Download, Eye, Receipt, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
 import billingService from '../../services/billingService';
+import walletService from '../../services/walletService';
+import generateReceiptHTML from '../../utils/receiptGenerator';
 
 // GST calculation function (same as POSBillingPage)
 const calculateGSTBreakdown = (items = []) => {
@@ -11,7 +13,7 @@ const calculateGSTBreakdown = (items = []) => {
     const itemPrice = item.isCombo ? item.comboPrice : item.price;
     return (itemPrice || 0) > 2500;
   });
-  
+
   // Calculate total bill amount
   const totalBillAmount = items.reduce((sum, item) => {
     if (item.isCombo) {
@@ -20,11 +22,11 @@ const calculateGSTBreakdown = (items = []) => {
       return sum + ((item.price || 0) * (item.quantity || 1));
     }
   }, 0);
-  
+
   let totalWithoutGST = 0;
   let gstAmount = 0;
   let isHighGST = hasHighValueProduct;
-  
+
   // Determine GST rate based on individual product prices
   if (hasHighValueProduct) {
     // 12% GST - reverse calculation
@@ -39,7 +41,7 @@ const calculateGSTBreakdown = (items = []) => {
   // Split GST into SGST and CGST
   const sgst = gstAmount / 2;
   const cgst = gstAmount / 2;
-  
+
   return {
     totalWithoutGST: Math.round(totalWithoutGST),
     totalGST: Math.round(gstAmount),
@@ -82,7 +84,7 @@ const BillHistoryPage = () => {
         search: searchTerm,
         // Add date filters if needed
       });
-      
+
       setBills(result.data || []);
     } catch (error) {
       console.error('Error loading bills:', error);
@@ -98,239 +100,107 @@ const BillHistoryPage = () => {
     setShowDetails(true);
   };
 
-  const handlePrintBill = (bill) => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('Please allow popups to print bills');
-      return;
+  const handlePrintBill = async (bill) => {
+    const loadingToast = toast.loading('Preparing receipt...');
+
+    try {
+      let loyaltyData = null;
+
+      // Fetch wallet data if customer phone exists
+      if (bill.customerPhone && bill.customerPhone !== 'N/A' && /^\d{10}$/.test(bill.customerPhone)) {
+        try {
+          // We need to fetch wallet details to show Total Points
+          const response = await walletService.getWalletByPhone(bill.customerPhone);
+          const wallet = response.data || response;
+
+          if (wallet) {
+            let redeemedPoints = 0;
+            let pointValue = 0;
+
+            // Try to find if points were redeemed for THIS bill
+            if (wallet.transactions && Array.isArray(wallet.transactions)) {
+              const redemptionTxn = wallet.transactions.find(t =>
+                (t.type === 'redeem' || t.type === 'redeemed') &&
+                (t.description?.includes(bill.billNumber) || t.metadata?.billNumber === bill.billNumber)
+              );
+
+              if (redemptionTxn) {
+                redeemedPoints = Math.abs(redemptionTxn.points);
+              }
+            }
+
+            // Fetch point price for calculation
+            let currentPointPrice = 1; // Default
+            try {
+              const configResponse = await walletService.getPointPriceConfig();
+              if (configResponse && configResponse.data) {
+                currentPointPrice = configResponse.data.price || 1;
+              } else if (configResponse && configResponse.price) {
+                currentPointPrice = configResponse.price || 1;
+              }
+            } catch (e) {
+              console.warn('Could not fetch point price', e);
+            }
+
+            if (redeemedPoints > 0) {
+              pointValue = redeemedPoints * currentPointPrice;
+            }
+
+            loyaltyData = {
+              totalPoints: wallet.points, // Current balance
+              redeemedPoints: redeemedPoints,
+              pointValue: pointValue
+            };
+          }
+        } catch (err) {
+          console.warn('Failed to fetch wallet for receipt', err);
+        }
+      }
+
+      // Construct enhanced bill object
+      const billWithLoyalty = {
+        ...bill,
+        loyalty: loyaltyData
+      };
+
+      const printWindow = window.open('', '_blank', 'width=800,height=700');
+      if (!printWindow) {
+        toast.error('Please allow popups to print bills');
+        toast.dismiss(loadingToast);
+        return;
+      }
+
+      const receiptHTML = generateReceiptHTML(billWithLoyalty, true);
+
+      printWindow.document.write(receiptHTML);
+      printWindow.document.close();
+
+      // Auto print logic is handled by receiptGenerator with autoPrint=true
+      printWindow.focus();
+
+      toast.dismiss(loadingToast);
+    } catch (error) {
+      console.error('Print error:', error);
+      toast.error('Failed to print receipt');
+      toast.dismiss(loadingToast);
     }
-
-const receiptHTML = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Receipt - ${bill.billNumber}</title>
-    <style>
-      @page {
-        size: 80mm auto;
-        margin: 2mm;
-      }
-
-      body {
-        font-family:  Arial, sans-serif;
-        font-size: 11.5px;
-        line-height: 1.3;
-        margin: 0;
-        padding: 2mm;
-        width: 76mm;
-        font-weight: bold;
-        color: #000;
-      }
-
-      .header {
-        text-align: center;
-        border-bottom: 1px dashed #000;
-        padding-bottom: 3mm;
-        margin-bottom: 3mm;
-      }
-
-      .store-name { font-size: 12px; margin-bottom: 1mm; }
-      .store-info { font-size: 9px; }
-
-      .bill-info {
-        margin: 3mm 0;
-        padding: 2mm 0;
-        border-bottom: 1px dashed #000;
-      }
-
-      .bill-info div { margin-bottom: 1mm; }
-
-      .customer-info {
-        padding: 2mm;
-        margin: 2mm 0;
-        border: 1px solid #000;
-        font-size: 10px;
-      }
-
-      .divider {
-        border-top: 1px dashed #000;
-        margin: 3mm 0;
-      }
-
-      .items-header {
-        font-size: 10px;
-        margin-bottom: 2px;
-        border-bottom: 1px solid #000;
-        padding-bottom: 1px;
-      }
-
-      .row {
-        display: flex;
-        justify-content: space-between;
-      }
-
-      .items-section div {
-        font-size: 10px;
-        margin-bottom: 1px;
-      }
-
-      .totals {
-        margin-top: 3mm;
-        padding-top: 2mm;
-        border-top: 1px dashed #000;
-      }
-
-      .total-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 1mm 0;
-      }
-
-      .final-total {
-        font-size: 12px;
-        border-top: 1px solid #000;
-        padding-top: 2mm;
-        margin-top: 2mm;
-      }
-
-      .footer {
-        text-align: center;
-        margin-top: 5mm;
-        padding-top: 3mm;
-        border-top: 1px dashed #000;
-        font-size: 9px;
-      }
-
-      @media print {
-        body { font-weight: bold; color: #000; }
-      }
-    </style>
-  </head>
-
-  <body>
-
-    <div class="header">
-      <div class="store-name">VEEDRA THE BRAND</div>
-      <div class="store-info">Wholesalers in Western Wear</div>
-      <div class="store-info">Ethnic Wear & Indo-Western Wear</div>
-      <div class="store-info">1st Parallel Road, Durgigudi</div>
-      <div class="store-info">Shimoga – 577201</div>
-      <div class="store-info">📞 70262 09627</div>
-      <div class="store-info">GSTIN: 29GJMPP54227F1Z0</div>
-    </div>
-
-    <div style="text-align:center; font-size:11px; margin:3mm 0;">INVOICE</div>
-
-    <div class="bill-info">
-      <div>Bill No: ${bill.billNumber}</div>
-      <div>Date: ${new Date(bill.createdAt).toLocaleDateString()}</div>
-      <div>Time: ${new Date(bill.createdAt).toLocaleTimeString()}</div>
-      <div>Cashier: ${bill.staffName}</div>
-      ${bill.transactionId ? `<div>TxnID: ${bill.transactionId}</div>` : ""}
-    </div>
-
-    ${(bill.customerName !== "Walk-in Customer" || bill.customerPhone !== "N/A") ? `
-      <div class="customer-info">
-        Customer: ${bill.customerName}<br>
-        Mobile: ${bill.customerPhone}
-      </div>
-    ` : ""}
-
-    <div class="divider"></div>
-
-    <div class="items-header row">
-      <span style="width:8mm;">SL</span>
-      <span style="width:32mm;">ITEM</span>
-      <span style="width:12mm; text-align:right;">QTY</span>
-      <span style="width:12mm; text-align:right;">RATE</span>
-      <span style="width:12mm; text-align:right;">TOTAL</span>
-    </div>
-
-    <div class="items-section">
-      ${bill.items.map((item, i) => `
-        <div class="row">
-          <span style="width:8mm;">${i + 1}</span>
-          <span style="width:32mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.name}</span>
-          <span style="width:12mm; text-align:right;">${item.quantity}</span>
-          <span style="width:12mm; text-align:right;">₹${item.price.toLocaleString()}</span>
-          <span style="width:12mm; text-align:right;">₹${item.total.toLocaleString()}</span>
-        </div>
-      `).join("")}
-    </div>
-
-    <div class="totals">
-      ${(() => {
-        const gst = calculateGSTBreakdown(bill.items || []);
-        return `
-          <div class="total-row"><span>Taxable Amount:</span><span>₹${gst.totalWithoutGST.toLocaleString()}</span></div>
-
-          ${gst.sgst5 ? `
-            <div class="total-row"><span>SGST (2.5%):</span><span>₹${gst.sgst5}</span></div>
-            <div class="total-row"><span>CGST (2.5%):</span><span>₹${gst.cgst5}</span></div>
-          ` : ""}
-
-          ${gst.sgst12 ? `
-            <div class="total-row"><span>SGST (6%):</span><span>₹${gst.sgst12}</span></div>
-            <div class="total-row"><span>CGST (6%):</span><span>₹${gst.cgst12}</span></div>
-          ` : ""}
-        `;
-      })()}
-
-      <div class="total-row final-total">
-        <span>GRAND TOTAL:</span>
-        <span>₹${bill.total.toLocaleString()}</span>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <div>
-      Payment: ${bill.paymentMethod.toUpperCase()}<br>
-      Paid: ₹${bill.receivedAmount || bill.total}<br>
-      Change: ₹${bill.change || 0}
-    </div>
-
-    <div class="divider"></div>
-
-    <div style="text-align:center; margin:2mm 0;">Terms & Conditions</div>
-    <div style="text-align:center; font-size:9px;">
-      No Exchange, No Return, No Guarantee.<br>
-      Please verify items before leaving the store.<br>
-      Working Hours: 8:00 AM – 9:00 PM
-    </div>
-
-    <div class="divider"></div>
-
-    <div class="footer">
-      Thank You for Shopping at<br>
-      VEEDRA THE BRAND<br>
-      Best Prices in Shimoga<br>
-      Wholesale & Retail Available!
-    </div>
-
-  </body>
-</html>`;
-
-
-    printWindow.document.write(receiptHTML);
-    printWindow.document.close();
-    
-    // Auto print after content loads
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-      toast.success(`Bill ${bill.billNumber} sent to printer`);
-    }, 500);
   };
+
+
+
+
+
+
+
 
   const handleDownloadReport = async () => {
     try {
       toast.loading('Generating sales report...');
-      
+
       // Get date range based on filter
       let startDate, endDate;
       const now = new Date();
-      
+
       switch (filterPeriod) {
         case 'today':
           startDate = new Date(now.setHours(0, 0, 0, 0));
@@ -356,10 +226,10 @@ const receiptHTML = `
       });
 
       const reportData = response.data || [];
-      
+
       // Generate CSV content
       const csvContent = generateCSVReport(reportData, filterPeriod);
-      
+
       // Download CSV file
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
@@ -370,7 +240,7 @@ const receiptHTML = `
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
+
       toast.dismiss();
       toast.success('Sales report downloaded successfully!');
     } catch (error) {
@@ -439,7 +309,7 @@ const receiptHTML = `
     // Bills Detail Section
     csvContent += 'BILL DETAILS\n';
     csvContent += 'Bill Number,Customer Name,Customer Phone,Items Count,Total,Payment Method,Staff,Date,Time\n';
-    
+
     bills.forEach(bill => {
       const date = new Date(bill.createdAt);
       csvContent += `${bill.billNumber},`;
@@ -458,9 +328,9 @@ const receiptHTML = `
 
   const filteredBills = bills.filter(bill => {
     const matchesSearch = bill.billNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         bill.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         bill.customerPhone.includes(searchTerm);
-    
+      bill.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      bill.customerPhone.includes(searchTerm);
+
     if (filterPeriod === 'today') {
       const today = new Date().toDateString();
       return matchesSearch && new Date(bill.createdAt).toDateString() === today;
@@ -630,13 +500,12 @@ const receiptHTML = `
                       <div className="text-sm font-medium text-gray-900">₹{bill.total.toLocaleString()}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        bill.paymentMethod.toLowerCase() === 'cash' ? 'bg-green-100 text-green-800' :
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${bill.paymentMethod.toLowerCase() === 'cash' ? 'bg-green-100 text-green-800' :
                         bill.paymentMethod.toLowerCase() === 'upi' ? 'bg-blue-100 text-blue-800' :
-                        bill.paymentMethod.toLowerCase() === 'card' ? 'bg-purple-100 text-purple-800' :
-                        bill.paymentMethod.toLowerCase() === 'mix' ? 'bg-orange-100 text-orange-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
+                          bill.paymentMethod.toLowerCase() === 'card' ? 'bg-purple-100 text-purple-800' :
+                            bill.paymentMethod.toLowerCase() === 'mix' ? 'bg-orange-100 text-orange-800' :
+                              'bg-yellow-100 text-yellow-800'
+                        }`}>
                         {bill.paymentMethod.toUpperCase()}
                       </span>
                     </td>
@@ -696,7 +565,7 @@ const receiptHTML = `
                   ×
                 </button>
               </div>
-              
+
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -709,7 +578,7 @@ const receiptHTML = `
                     <p className="font-medium">{selectedBill.staffName}</p>
                   </div>
                 </div>
-                
+
                 <div>
                   <p className="text-sm text-gray-600 mb-2">Items</p>
                   <div className="border rounded-lg">
@@ -738,7 +607,7 @@ const receiptHTML = `
                     ))}
                   </div>
                 </div>
-                
+
                 {/* Combo Summary */}
                 {selectedBill.combos && selectedBill.combos.length > 0 && (
                   <div className="bg-green-50 p-4 rounded-lg border border-green-200">
@@ -755,7 +624,7 @@ const receiptHTML = `
                     </div>
                   </div>
                 )}
-                
+
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <div className="space-y-2">
                     {(() => {
@@ -766,7 +635,7 @@ const receiptHTML = `
                             <span>Product Price (Excl. GST):</span>
                             <span>₹{gstData.totalWithoutGST.toLocaleString()}</span>
                           </div>
-                          
+
                           {/* GST Breakdown */}
                           <div className="border-t pt-2">
                             <div className="text-sm text-gray-600 mb-2">GST Breakdown:</div>
@@ -795,14 +664,14 @@ const receiptHTML = `
                               </>
                             )}
                           </div>
-                          
+
                           {selectedBill.combos && selectedBill.combos.length > 0 && (
                             <div className="flex justify-between text-green-600 border-t pt-2">
                               <span>Combo Discount:</span>
                               <span>-₹{selectedBill.items.reduce((sum, item) => sum + (item.comboSavings || 0), 0).toLocaleString()}</span>
                             </div>
                           )}
-                          
+
                           <div className="flex justify-between font-bold text-lg border-t pt-2">
                             <span>Total Amount (Incl. GST):</span>
                             <span>₹{selectedBill.total.toLocaleString()}</span>
@@ -812,7 +681,7 @@ const receiptHTML = `
                     })()}
                   </div>
                 </div>
-                
+
                 <div className="flex justify-between items-center">
                   <div>
                     <p className="text-sm text-gray-600">Payment Method</p>
@@ -826,7 +695,7 @@ const receiptHTML = `
                   </div>
                 </div>
               </div>
-              
+
               <div className="flex justify-end space-x-3 mt-6 pt-4 border-t">
                 <button
                   onClick={() => setShowDetails(false)}
