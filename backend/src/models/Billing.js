@@ -7,7 +7,7 @@ const billingSchema = new mongoose.Schema({
     unique: true,
     uppercase: true
   },
-  
+
   // Bill Type - Key Feature for E-commerce
   billType: {
     type: String,
@@ -15,7 +15,7 @@ const billingSchema = new mongoose.Schema({
     required: true,
     default: 'normal'
   },
-  
+
   // Customer Information
   customer: {
     name: {
@@ -43,7 +43,7 @@ const billingSchema = new mongoose.Schema({
       uppercase: true
     }
   },
-  
+
   // Product Items
   items: [{
     product: {
@@ -103,7 +103,7 @@ const billingSchema = new mongoose.Schema({
       required: true,
       min: [0, 'Total amount cannot be negative']
     },
-    
+
     // Combo Assignment Info
     comboAssignment: {
       comboId: {
@@ -122,7 +122,7 @@ const billingSchema = new mongoose.Schema({
       }
     }
   }],
-  
+
   // Applied Combos - Track multiple combos in mixed billing
   appliedCombos: [{
     combo: {
@@ -158,7 +158,7 @@ const billingSchema = new mongoose.Schema({
       type: Number,
       required: true
     },
-    
+
     // Slot-wise breakdown
     slotBreakdown: [{
       slotName: String,
@@ -166,7 +166,7 @@ const billingSchema = new mongoose.Schema({
       totalValue: Number
     }]
   }],
-  
+
   // Bill Totals
   totals: {
     subtotal: {
@@ -205,7 +205,7 @@ const billingSchema = new mongoose.Schema({
       default: 0
     }
   },
-  
+
   // Tax Breakdown (GST)
   taxBreakdown: [{
     taxRate: {
@@ -233,7 +233,7 @@ const billingSchema = new mongoose.Schema({
       required: true
     }
   }],
-  
+
   // Payment Information
   payment: {
     method: {
@@ -279,7 +279,7 @@ const billingSchema = new mongoose.Schema({
       trim: true
     }
   },
-  
+
   // Commission Tracking
   commissions: {
     vendor: [{
@@ -304,14 +304,14 @@ const billingSchema = new mongoose.Schema({
       commissionAmount: Number
     }
   },
-  
+
   // Bill Status and Metadata
   status: {
     type: String,
     enum: ['draft', 'completed', 'cancelled', 'returned'],
     default: 'completed'
   },
-  
+
   // Billing Staff
   billedBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -322,7 +322,7 @@ const billingSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  
+
   // Store/Branch Information
   branch: {
     type: mongoose.Schema.Types.ObjectId,
@@ -332,13 +332,13 @@ const billingSchema = new mongoose.Schema({
     type: String,
     default: 'Main Store'
   },
-  
+
   // Additional Information
   notes: {
     type: String,
     maxlength: [500, 'Notes cannot exceed 500 characters']
   },
-  
+
   // Return/Exchange Information
   returnInfo: {
     isReturn: {
@@ -355,7 +355,7 @@ const billingSchema = new mongoose.Schema({
       default: 0
     }
   },
-  
+
   // Printing and Export
   printInfo: {
     printCount: {
@@ -374,14 +374,14 @@ const billingSchema = new mongoose.Schema({
       }
     }]
   },
-  
+
   // System Fields
   billDate: {
     type: Date,
     default: Date.now,
     required: true
   },
-  
+
   // Analytics flags
   analytics: {
     isComboSale: {
@@ -417,104 +417,102 @@ billingSchema.index({ 'totals.grandTotal': -1 });
 billingSchema.index({ createdAt: -1 });
 
 // Generate bill number
-billingSchema.pre('save', async function(next) {
+billingSchema.pre('save', async function (next) {
   if (this.isNew && !this.billNumber) {
     const today = new Date();
-    const year = today.getFullYear().toString().slice(-2);
-    const month = (today.getMonth() + 1).toString().padStart(2, '0');
-    const day = today.getDate().toString().padStart(2, '0');
-    
-    // Find the last bill number for today
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const prefix = `${year}${month}`;
+
     const lastBill = await this.constructor.findOne({
-      billNumber: new RegExp(`^BILL${year}${month}${day}`),
-      billDate: {
-        $gte: new Date(today.setHours(0, 0, 0, 0)),
-        $lt: new Date(today.setHours(23, 59, 59, 999))
-      }
+      billNumber: new RegExp(`^${prefix}`)
     }).sort({ billNumber: -1 });
-    
+
     let sequence = 1;
     if (lastBill) {
-      const lastSequence = parseInt(lastBill.billNumber.slice(-4));
-      sequence = lastSequence + 1;
+      const lastSequenceStr = lastBill.billNumber.slice(6);
+      const lastSequence = parseInt(lastSequenceStr, 10);
+      if (!isNaN(lastSequence)) {
+        sequence = lastSequence + 1;
+      }
     }
-    
-    this.billNumber = `BILL${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
+
+    this.billNumber = `${prefix}${sequence.toString().padStart(5, '0')}`;
   }
   next();
 });
 
 // Calculate totals before saving
-billingSchema.pre('save', function(next) {
+billingSchema.pre('save', function (next) {
   // Skip calculation if totals are already set (to prevent overriding payment controller calculations)
   if (this.isNew && this.totals.finalAmount > 0) {
     // Ensure final amount is never negative
     this.totals.finalAmount = Math.max(0, this.totals.finalAmount);
     this.totals.grandTotal = Math.max(0, this.totals.grandTotal);
-    
+
     // Update analytics
     this.analytics.totalItems = this.items.reduce((sum, item) => sum + item.quantity, 0);
-    this.analytics.averageItemValue = this.analytics.totalItems > 0 ? 
+    this.analytics.averageItemValue = this.analytics.totalItems > 0 ?
       this.totals.subtotal / this.analytics.totalItems : 0;
     this.analytics.isComboSale = this.appliedCombos.length > 0;
-    this.analytics.hasMixedItems = this.items.some(item => item.comboAssignment?.isComboItem) && 
+    this.analytics.hasMixedItems = this.items.some(item => item.comboAssignment?.isComboItem) &&
       this.items.some(item => !item.comboAssignment?.isComboItem);
-    
+
     return next();
   }
-  
+
   // Calculate subtotal
   this.totals.subtotal = this.items.reduce((sum, item) => {
     return sum + (item.unitPrice * item.quantity);
   }, 0);
-  
+
   // Calculate total discount
   this.totals.totalDiscount = this.items.reduce((sum, item) => {
     return sum + (item.discount * item.quantity);
   }, 0);
-  
+
   // Calculate combo savings
   this.totals.comboSavings = this.appliedCombos.reduce((sum, combo) => {
     return sum + combo.savingsAmount;
   }, 0);
-  
+
   // Calculate taxable amount (ensure it's not negative)
   this.totals.taxableAmount = Math.max(0, this.totals.subtotal - this.totals.totalDiscount - this.totals.comboSavings);
-  
+
   // Calculate total tax (set to 0 since GST is included in prices)
   this.totals.totalTax = 0;
-  
+
   // Calculate grand total (ensure it's not negative)
   this.totals.grandTotal = Math.max(0, this.totals.taxableAmount + this.totals.totalTax);
-  
+
   // Apply round off
   this.totals.roundOff = Math.round(this.totals.grandTotal) - this.totals.grandTotal;
   this.totals.finalAmount = Math.max(0, Math.round(this.totals.grandTotal));
-  
+
   // Update analytics
   this.analytics.totalItems = this.items.reduce((sum, item) => sum + item.quantity, 0);
-  this.analytics.averageItemValue = this.analytics.totalItems > 0 ? 
+  this.analytics.averageItemValue = this.analytics.totalItems > 0 ?
     this.totals.subtotal / this.analytics.totalItems : 0;
   this.analytics.isComboSale = this.appliedCombos.length > 0;
-  this.analytics.hasMixedItems = this.items.some(item => item.comboAssignment?.isComboItem) && 
+  this.analytics.hasMixedItems = this.items.some(item => item.comboAssignment?.isComboItem) &&
     this.items.some(item => !item.comboAssignment?.isComboItem);
-  
+
   next();
 });
 
 // Virtual for total savings
-billingSchema.virtual('totalSavings').get(function() {
+billingSchema.virtual('totalSavings').get(function () {
   return this.totals.totalDiscount + this.totals.comboSavings;
 });
 
 // Virtual for profit calculation
-billingSchema.virtual('totalProfit').get(function() {
+billingSchema.virtual('totalProfit').get(function () {
   // This would require product cost prices to calculate actual profit
   return 0; // Placeholder
 });
 
 // Method to add combo to bill
-billingSchema.methods.addCombo = function(combo, items) {
+billingSchema.methods.addCombo = function (combo, items) {
   const comboData = {
     combo: combo._id,
     comboName: combo.name,
@@ -523,12 +521,12 @@ billingSchema.methods.addCombo = function(combo, items) {
     itemsCount: items.length,
     slotBreakdown: []
   };
-  
+
   // Calculate combo discount
   comboData.discountAmount = combo.calculateDiscount(comboData.originalAmount, items);
   comboData.finalAmount = comboData.originalAmount - comboData.discountAmount;
   comboData.savingsAmount = comboData.discountAmount;
-  
+
   // Create slot breakdown
   const slotGroups = {};
   items.forEach(item => {
@@ -539,25 +537,25 @@ billingSchema.methods.addCombo = function(combo, items) {
     slotGroups[slot].itemsCount += item.quantity;
     slotGroups[slot].totalValue += (item.unitPrice * item.quantity);
   });
-  
+
   comboData.slotBreakdown = Object.entries(slotGroups).map(([slotName, data]) => ({
     slotName,
     itemsCount: data.itemsCount,
     totalValue: data.totalValue
   }));
-  
+
   this.appliedCombos.push(comboData);
   this.billType = this.items.some(item => !item.comboAssignment.isComboItem) ? 'mixed' : 'combo';
 };
 
 // Static method for daily sales report
-billingSchema.statics.getDailySales = function(date) {
+billingSchema.statics.getDailySales = function (date) {
   const startDate = new Date(date);
   startDate.setHours(0, 0, 0, 0);
-  
+
   const endDate = new Date(date);
   endDate.setHours(23, 59, 59, 999);
-  
+
   return this.aggregate([
     {
       $match: {
@@ -583,7 +581,7 @@ billingSchema.statics.getDailySales = function(date) {
 };
 
 // Static method for product-wise sales
-billingSchema.statics.getProductSales = function(startDate, endDate) {
+billingSchema.statics.getProductSales = function (startDate, endDate) {
   return this.aggregate([
     {
       $match: {

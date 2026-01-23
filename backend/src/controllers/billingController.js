@@ -46,9 +46,29 @@ const createBill = asyncHandler(async (req, res) => {
       }
     }
 
-    // Generate bill number
-    const billCount = await Billing.countDocuments();
-    const billNumber = `BILL${String(billCount + 1).padStart(6, '0')}`;
+    // Generate bill number (YYYYMM00001)
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const prefix = `${year}${month}`; // e.g. 202601
+
+    // Find the last bill of this month (starting with YYYYMM)
+    const lastBill = await Billing.findOne({
+      billNumber: new RegExp(`^${prefix}`)
+    }).sort({ billNumber: -1 });
+
+    let nextSequence = 1;
+    if (lastBill) {
+      // Extract sequence part (remove the 6-digit prefix)
+      const lastSequenceStr = lastBill.billNumber.slice(6);
+      const lastSequence = parseInt(lastSequenceStr, 10);
+      if (!isNaN(lastSequence)) {
+        nextSequence = lastSequence + 1;
+      }
+    }
+
+    const billNumber = `${prefix}${String(nextSequence).padStart(5, '0')}`;
+    console.log(`🔢 Generated Bill Number: ${billNumber}`);
 
     // Transform items to match schema
     const billItems = items.map(item => {
