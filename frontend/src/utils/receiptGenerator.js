@@ -1,109 +1,109 @@
 
 const generateReceiptHTML = (bill, autoPrint = false) => {
-    if (!bill) {
-        console.error('No bill data provided to generateReceiptHTML');
-        return '';
+  if (!bill) {
+    console.error('No bill data provided to generateReceiptHTML');
+    return '';
+  }
+
+  const fmt = (val) => `₹${parseFloat(val || 0).toFixed(2)}`;
+
+  // Calculate GST for individual items based on price threshold
+  const calculateItemGST = (price, quantity) => {
+    if (price > 2500) {
+      // 12% GST for items above 2500
+      const gstRate = 0.12;
+      const baseAmount = (price * quantity) / (1 + gstRate);
+      const totalGST = (price * quantity) - baseAmount;
+      const cgst = totalGST / 2;
+      const sgst = totalGST / 2;
+
+      return {
+        gstRate: 12,
+        baseAmount: parseFloat(baseAmount.toFixed(2)),
+        cgst: parseFloat(cgst.toFixed(2)),
+        sgst: parseFloat(sgst.toFixed(2)),
+        totalGST: parseFloat(totalGST.toFixed(2))
+      };
+    } else {
+      // 5% GST for items 2500 and below
+      const gstRate = 0.05;
+      const baseAmount = (price * quantity) / (1 + gstRate);
+      const totalGST = (price * quantity) - baseAmount;
+      const cgst = totalGST / 2;
+      const sgst = totalGST / 2;
+
+      return {
+        gstRate: 5,
+        baseAmount: parseFloat(baseAmount.toFixed(2)),
+        cgst: parseFloat(cgst.toFixed(2)),
+        sgst: parseFloat(sgst.toFixed(2)),
+        totalGST: parseFloat(totalGST.toFixed(2))
+      };
     }
+  };
 
-    const fmt = (val) => `₹${parseFloat(val || 0).toFixed(2)}`;
+  // Calculate overall GST breakdown for all items
+  const calculateOverallGST = (items) => {
+    let taxable12 = 0;
+    let cgst12 = 0;
+    let sgst12 = 0;
 
-    // Calculate GST for individual items based on price threshold
-    const calculateItemGST = (price, quantity) => {
-        if (price > 2500) {
-            // 12% GST for items above 2500
-            const gstRate = 0.12;
-            const baseAmount = (price * quantity) / (1 + gstRate);
-            const totalGST = (price * quantity) - baseAmount;
-            const cgst = totalGST / 2;
-            const sgst = totalGST / 2;
+    let taxable5 = 0;
+    let cgst5 = 0;
+    let sgst5 = 0;
 
-            return {
-                gstRate: 12,
-                baseAmount: parseFloat(baseAmount.toFixed(2)),
-                cgst: parseFloat(cgst.toFixed(2)),
-                sgst: parseFloat(sgst.toFixed(2)),
-                totalGST: parseFloat(totalGST.toFixed(2))
-            };
-        } else {
-            // 5% GST for items 2500 and below
-            const gstRate = 0.05;
-            const baseAmount = (price * quantity) / (1 + gstRate);
-            const totalGST = (price * quantity) - baseAmount;
-            const cgst = totalGST / 2;
-            const sgst = totalGST / 2;
+    items.forEach(item => {
+      // CRITICAL FIX: Use price field which contains adjusted price for combos
+      // Also handle historical data where unitPrice is used
+      const price = item.price || item.pricing?.offerPrice || item.unitPrice || 0;
+      const gst = calculateItemGST(price, item.quantity || 1);
 
-            return {
-                gstRate: 5,
-                baseAmount: parseFloat(baseAmount.toFixed(2)),
-                cgst: parseFloat(cgst.toFixed(2)),
-                sgst: parseFloat(sgst.toFixed(2)),
-                totalGST: parseFloat(totalGST.toFixed(2))
-            };
-        }
+      if (gst.gstRate === 12) {
+        taxable12 += gst.baseAmount;
+        cgst12 += gst.cgst;
+        sgst12 += gst.sgst;
+      } else {
+        taxable5 += gst.baseAmount;
+        cgst5 += gst.cgst;
+        sgst5 += gst.sgst;
+      }
+    });
+
+    return {
+      gst12: {
+        taxable: parseFloat(taxable12.toFixed(2)),
+        cgst: parseFloat(cgst12.toFixed(2)),
+        sgst: parseFloat(sgst12.toFixed(2)),
+        total: parseFloat((cgst12 + sgst12).toFixed(2))
+      },
+      gst5: {
+        taxable: parseFloat(taxable5.toFixed(2)),
+        cgst: parseFloat(cgst5.toFixed(2)),
+        sgst: parseFloat(sgst5.toFixed(2)),
+        total: parseFloat((cgst5 + sgst5).toFixed(2))
+      }
     };
+  };
 
-    // Calculate overall GST breakdown for all items
-    const calculateOverallGST = (items) => {
-        let taxable12 = 0;
-        let cgst12 = 0;
-        let sgst12 = 0;
+  // Calculate actual discount: Total MRP - Total Offer Price (using price field for combo items)
+  const calculateActualDiscount = (items) => {
+    let totalMRP = 0;
+    let totalOffer = 0;
 
-        let taxable5 = 0;
-        let cgst5 = 0;
-        let sgst5 = 0;
+    items.forEach(item => {
+      const mrp = item.pricing?.mrp || item.originalPrice || item.mrp || 0;
+      // CRITICAL FIX: Use price field which contains adjusted price for combos
+      const offerPrice = item.price || item.pricing?.offerPrice || item.unitPrice || 0;
+      const qty = item.quantity || 1;
 
-        items.forEach(item => {
-            // CRITICAL FIX: Use price field which contains adjusted price for combos
-            // Also handle historical data where unitPrice is used
-            const price = item.price || item.pricing?.offerPrice || item.unitPrice || 0;
-            const gst = calculateItemGST(price, item.quantity || 1);
+      totalMRP += mrp * qty;
+      totalOffer += offerPrice * qty;
+    });
 
-            if (gst.gstRate === 12) {
-                taxable12 += gst.baseAmount;
-                cgst12 += gst.cgst;
-                sgst12 += gst.sgst;
-            } else {
-                taxable5 += gst.baseAmount;
-                cgst5 += gst.cgst;
-                sgst5 += gst.sgst;
-            }
-        });
+    return parseFloat((totalMRP - totalOffer).toFixed(2));
+  };
 
-        return {
-            gst12: {
-                taxable: parseFloat(taxable12.toFixed(2)),
-                cgst: parseFloat(cgst12.toFixed(2)),
-                sgst: parseFloat(sgst12.toFixed(2)),
-                total: parseFloat((cgst12 + sgst12).toFixed(2))
-            },
-            gst5: {
-                taxable: parseFloat(taxable5.toFixed(2)),
-                cgst: parseFloat(cgst5.toFixed(2)),
-                sgst: parseFloat(sgst5.toFixed(2)),
-                total: parseFloat((cgst5 + sgst5).toFixed(2))
-            }
-        };
-    };
-
-    // Calculate actual discount: Total MRP - Total Offer Price (using price field for combo items)
-    const calculateActualDiscount = (items) => {
-        let totalMRP = 0;
-        let totalOffer = 0;
-
-        items.forEach(item => {
-            const mrp = item.pricing?.mrp || item.originalPrice || item.mrp || 0;
-            // CRITICAL FIX: Use price field which contains adjusted price for combos
-            const offerPrice = item.price || item.pricing?.offerPrice || item.unitPrice || 0;
-            const qty = item.quantity || 1;
-
-            totalMRP += mrp * qty;
-            totalOffer += offerPrice * qty;
-        });
-
-        return parseFloat((totalMRP - totalOffer).toFixed(2));
-    };
-
-    return `
+  return `
     <!DOCTYPE html>
     <html>
       <head>
@@ -244,13 +244,14 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         </div>
         
         ${bill.singlesItems && bill.singlesItems.length > 0 ?
-            (bill.singlesItems || []).map((item, index) => {
-                const mrp = item.pricing?.mrp || item.originalPrice || 0;
-                const offerPrice = item.price || item.pricing?.offerPrice || 0;
-                return `
+      (bill.singlesItems || []).map((item, index) => {
+        const mrp = item.pricing?.mrp || item.originalPrice || 0;
+        const offerPrice = item.price || item.pricing?.offerPrice || 0;
+        return `
           <div class="item-row">
             <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
               ${item.name}
+              ${item.hsnCode && item.hsnCode !== 'N/A' ? `<div style="font-size: 10px; color: #000; font-weight: bold;">HSN: ${item.hsnCode}</div>` : ''}
             </span>
             <span style="width: 9mm;">${fmt(mrp)}</span>
             <span style="width: 6mm; text-align: right;">${item.quantity}</span>
@@ -258,18 +259,19 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             <span style="width: 11mm; font-weight: bold;">${fmt(offerPrice * item.quantity)}</span>
           </div>
         `;
-            }).join('') : ''}
+      }).join('') : ''}
 
         ${bill.comboItems && bill.comboItems.length > 0 ?
-            (bill.comboItems || []).map((item, index) => {
-                // CRITICAL FIX: Use price field which contains the adjusted price
-                const adjustedPrice = item.price || item.comboPrice || item.adjustedPrice || 0;
-                const originalMRP = item.pricing?.mrp || item.originalPrice || 0;
+      (bill.comboItems || []).map((item, index) => {
+        // CRITICAL FIX: Use price field which contains the adjusted price
+        const adjustedPrice = item.price || item.comboPrice || item.adjustedPrice || 0;
+        const originalMRP = item.pricing?.mrp || item.originalPrice || 0;
 
-                return `
+        return `
           <div class="item-row">
             <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
               ${item.name}
+               ${item.hsnCode && item.hsnCode !== 'N/A' ? `<div style="font-size: 10px; color: #000; font-weight: bold;">HSN: ${item.hsnCode}</div>` : ''}
             </span>
             <span style="width: 9mm;">${fmt(originalMRP)}</span>
             <span style="width: 6mm; text-align: right;">${item.quantity}</span>
@@ -277,17 +279,18 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             <span style="width: 11mm; font-weight: bold;">${fmt(adjustedPrice * item.quantity)}</span>
           </div>
         `;
-            }).join('') : ''}
+      }).join('') : ''}
         
         ${(!bill.singlesItems && !bill.comboItems && bill.items) ?
-            // Fallback for BillHistory where items aren't separated
-            bill.items.map((item, index) => {
-                const mrp = item.pricing?.mrp || item.originalPrice || item.mrp || item.price || 0; // rough estimate if missing
-                const price = item.price || item.comboPrice || item.unitPrice || 0;
-                return `
+      // Fallback for BillHistory where items aren't separated
+      bill.items.map((item, index) => {
+        const mrp = item.pricing?.mrp || item.originalPrice || item.mrp || item.price || 0; // rough estimate if missing
+        const price = item.price || item.comboPrice || item.unitPrice || 0;
+        return `
           <div class="item-row">
             <span style="width: 20mm; word-wrap: break-word; line-height: 1.2;">
               ${item.name || item.productName}
+               ${item.hsnCode && item.hsnCode !== 'N/A' ? `<div style="font-size: 10px; color: #000; font-weight: bold;">HSN: ${item.hsnCode}</div>` : ''}
             </span>
             <span style="width: 9mm;">${fmt(mrp)}</span>
             <span style="width: 6mm; text-align: right;">${item.quantity}</span>
@@ -295,31 +298,31 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             <span style="width: 11mm; font-weight: bold;">${fmt(item.total || (price * item.quantity))}</span>
           </div>
         `;
-            }).join('') : ''}
+      }).join('') : ''}
         
         <div class="solid-divider"></div>
         
         <div style="font-size: 12px; margin-top: 2mm;">
           ${(() => {
-            const allItems = [
-                ...(bill.singlesItems || []),
-                ...(bill.comboItems || []),
-                ...(!bill.singlesItems && !bill.comboItems ? (bill.items || []) : [])
-            ];
-            const totalItems = allItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
-            const gstBreakdown = calculateOverallGST(allItems);
+      const allItems = [
+        ...(bill.singlesItems || []),
+        ...(bill.comboItems || []),
+        ...(!bill.singlesItems && !bill.comboItems ? (bill.items || []) : [])
+      ];
+      const totalItems = allItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      const gstBreakdown = calculateOverallGST(allItems);
 
-            // Calculate actual discount
-            const actualDiscount = calculateActualDiscount(allItems);
+      // Calculate actual discount
+      const actualDiscount = calculateActualDiscount(allItems);
 
-            // Calculate total MRP
-            const totalMRP = allItems.reduce((sum, item) => {
-                const mrp = item.pricing?.mrp || item.originalPrice || item.mrp || 0;
-                const qty = item.quantity || 1;
-                return sum + (mrp * qty);
-            }, 0);
+      // Calculate total MRP
+      const totalMRP = allItems.reduce((sum, item) => {
+        const mrp = item.pricing?.mrp || item.originalPrice || item.mrp || 0;
+        const qty = item.quantity || 1;
+        return sum + (mrp * qty);
+      }, 0);
 
-            return `
+      return `
               <div class="flex-between">
                 <span>Total Items:</span>
                 <span class="bold">${allItems.length}</span>
@@ -396,7 +399,7 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 ` : ''}
               </div>
             `;
-        })()}
+    })()}
         </div>
         
         <div class="divider"></div>

@@ -44,6 +44,13 @@ const billingSchema = new mongoose.Schema({
     }
   },
 
+  // Loyalty Points Data (Snapshot at time of billing)
+  loyalty: {
+    totalPoints: Number,
+    redeemedPoints: Number,
+    pointValue: Number
+  },
+
   // Product Items
   items: [{
     product: {

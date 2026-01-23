@@ -1,20 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { Search, Filter, Calendar, Download, Eye, Receipt, DollarSign } from 'lucide-react';
+import { Search, Filter, Calendar, Download, Eye, Receipt, DollarSign, XCircle, Trash2, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 import billingService from '../../services/billingService';
 import walletService from '../../services/walletService';
 import generateReceiptHTML from '../../utils/receiptGenerator';
 
-// GST calculation function (same as POSBillingPage)
+// GST calculation function
 const calculateGSTBreakdown = (items = []) => {
-  // Check if any individual product has price > 2500
   const hasHighValueProduct = items.some(item => {
     const itemPrice = item.isCombo ? item.comboPrice : item.price;
     return (itemPrice || 0) > 2500;
   });
 
-  // Calculate total bill amount
   const totalBillAmount = items.reduce((sum, item) => {
     if (item.isCombo) {
       return sum + ((item.comboPrice || 0) * (item.quantity || 1));
@@ -27,18 +25,14 @@ const calculateGSTBreakdown = (items = []) => {
   let gstAmount = 0;
   let isHighGST = hasHighValueProduct;
 
-  // Determine GST rate based on individual product prices
   if (hasHighValueProduct) {
-    // 12% GST - reverse calculation
     totalWithoutGST = totalBillAmount / 1.12;
     gstAmount = totalBillAmount - totalWithoutGST;
   } else {
-    // 5% GST - reverse calculation  
     totalWithoutGST = totalBillAmount / 1.05;
     gstAmount = totalBillAmount - totalWithoutGST;
   }
 
-  // Split GST into SGST and CGST
   const sgst = gstAmount / 2;
   const cgst = gstAmount / 2;
 
@@ -57,39 +51,72 @@ const BillHistoryPage = () => {
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterPeriod, setFilterPeriod] = useState('all');
+
+  // Advanced Filters
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [hsnFilter, setHsnFilter] = useState('');
+
   const [selectedBill, setSelectedBill] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
 
+  // Stats
+  const [stats, setStats] = useState({
+    count: 0,
+    sales: 0,
+    average: 0
+  });
+
   useEffect(() => {
     loadBills();
-  }, []);
+  }, [startDate, endDate, paymentFilter, statusFilter, hsnFilter]);
+  // Trigger load on filter change (debounced search handles its own)
 
   // Reload bills when search term changes (with debounce)
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchTerm !== '') {
-        loadBills();
-      }
+      loadBills();
     }, 500);
-
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
   const loadBills = async () => {
     setLoading(true);
     try {
-      // Fetch real bills from the backend
-      const result = await billingService.getBills({
+      const params = {
         search: searchTerm,
-        // Add date filters if needed
+        paymentMethod: paymentFilter,
+        status: statusFilter,
+        hsnCode: hsnFilter
+      };
+
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+
+      const result = await billingService.getBills(params);
+
+      const fetchedBills = result.data || [];
+      setBills(fetchedBills);
+
+      // Calculate Stats Locally based on fetched filtered data
+      // (Backend pagination might affect this if we had huge data, but for now client-side aggregation of fetched page or we rely on backend stats if implemented. 
+      // Current usage implies fetching all matching or first page. If pagination exists, this total might be just page total. 
+      // For accurate totals with pagination, backend should return stats. 
+      // Assuming 'limit' is high or we sum up what we got.)
+
+      const totalSales = fetchedBills.reduce((sum, bill) => sum + (bill.total || 0), 0);
+      setStats({
+        count: fetchedBills.length,
+        sales: totalSales,
+        average: fetchedBills.length > 0 ? totalSales / fetchedBills.length : 0
       });
 
-      setBills(result.data || []);
     } catch (error) {
       console.error('Error loading bills:', error);
       toast.error('Failed to load bill history');
-      setBills([]); // Set empty array on error
+      setBills([]);
     } finally {
       setLoading(false);
     }
@@ -102,340 +129,410 @@ const BillHistoryPage = () => {
 
   const handlePrintBill = async (bill) => {
     const loadingToast = toast.loading('Preparing receipt...');
-
     try {
       let loyaltyData = null;
-
-      // Fetch wallet data if customer phone exists
       if (bill.customerPhone && bill.customerPhone !== 'N/A' && /^\d{10}$/.test(bill.customerPhone)) {
         try {
-          // We need to fetch wallet details to show Total Points
           const response = await walletService.getWalletByPhone(bill.customerPhone);
           const wallet = response.data || response;
-
           if (wallet) {
             let redeemedPoints = 0;
             let pointValue = 0;
-
-            // Try to find if points were redeemed for THIS bill
             if (wallet.transactions && Array.isArray(wallet.transactions)) {
               const redemptionTxn = wallet.transactions.find(t =>
                 (t.type === 'redeem' || t.type === 'redeemed') &&
                 (t.description?.includes(bill.billNumber) || t.metadata?.billNumber === bill.billNumber)
               );
-
-              if (redemptionTxn) {
-                redeemedPoints = Math.abs(redemptionTxn.points);
-              }
+              if (redemptionTxn) redeemedPoints = Math.abs(redemptionTxn.points);
             }
-
-            // Fetch point price for calculation
-            let currentPointPrice = 1; // Default
+            let currentPointPrice = 1;
             try {
-              const configResponse = await walletService.getPointPriceConfig();
-              if (configResponse && configResponse.data) {
-                currentPointPrice = configResponse.data.price || 1;
-              } else if (configResponse && configResponse.price) {
-                currentPointPrice = configResponse.price || 1;
-              }
+              const configResponse = await walletService.getPointConfig();
+              if (configResponse?.data?.pointPrice) currentPointPrice = configResponse.data.pointPrice;
             } catch (e) {
-              console.warn('Could not fetch point price', e);
+              // ignore
             }
-
-            if (redeemedPoints > 0) {
-              pointValue = redeemedPoints * currentPointPrice;
-            }
-
-            loyaltyData = {
-              totalPoints: wallet.points, // Current balance
-              redeemedPoints: redeemedPoints,
-              pointValue: pointValue
-            };
+            if (redeemedPoints > 0) pointValue = redeemedPoints * currentPointPrice;
+            loyaltyData = { totalPoints: wallet.points, redeemedPoints, pointValue };
           }
-        } catch (err) {
-          console.warn('Failed to fetch wallet for receipt', err);
-        }
+        } catch (err) { console.warn('Failed to fetch wallet', err); }
       }
-
-      // Construct enhanced bill object
-      const billWithLoyalty = {
-        ...bill,
-        loyalty: loyaltyData
-      };
-
+      const billWithLoyalty = { ...bill, loyalty: loyaltyData };
       const printWindow = window.open('', '_blank', 'width=800,height=700');
       if (!printWindow) {
-        toast.error('Please allow popups to print bills');
-        toast.dismiss(loadingToast);
+        toast.error('Please allow popups');
         return;
       }
-
       const receiptHTML = generateReceiptHTML(billWithLoyalty, true);
-
       printWindow.document.write(receiptHTML);
       printWindow.document.close();
-
-      // Auto print logic is handled by receiptGenerator with autoPrint=true
       printWindow.focus();
-
-      toast.dismiss(loadingToast);
     } catch (error) {
       console.error('Print error:', error);
       toast.error('Failed to print receipt');
+    } finally {
       toast.dismiss(loadingToast);
     }
   };
 
-
-
-
-
-
-
-
-  const handleDownloadReport = async () => {
+  const handleCancelBill = async (bill) => {
+    if (!window.confirm(`Are you sure you want to cancel Bill ${bill.billNumber}? \n\nThis will restore stock and rollback wallet points.`)) {
+      return;
+    }
+    const loadingToast = toast.loading('Cancelling bill...');
     try {
-      toast.loading('Generating sales report...');
+      await billingService.cancelBill(bill._id);
+      toast.success('Bill cancelled successfully');
+      loadBills();
+    } catch (error) {
+      console.error('Cancel error:', error);
+      toast.error(error.response?.data?.message || 'Failed to cancel bill');
+    } finally {
+      toast.dismiss(loadingToast);
+    }
+  };
 
-      // Get date range based on filter
-      let startDate, endDate;
-      const now = new Date();
+  const handleDeleteOldBills = async () => {
+    if (!startDate) {
+      toast.error('Please select a "From Date" to define the cutoff for deletion.');
+      return;
+    }
+    const cutoffDate = new Date(startDate);
+    const confirmMsg = `WARNING: This will PERMANENTLY DELETE all bills created BEFORE ${cutoffDate.toDateString()}.\n\nThis action cannot be undone.\n\nAre you absolutely sure?`;
 
-      switch (filterPeriod) {
-        case 'today':
-          startDate = new Date(now.setHours(0, 0, 0, 0));
-          endDate = new Date(now.setHours(23, 59, 59, 999));
-          break;
-        case 'week':
-          startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-          endDate = new Date();
-          break;
-        case 'month':
-          startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-          endDate = new Date();
-          break;
-        default:
-          startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000); // Last year
-          endDate = new Date();
+    if (window.confirm(confirmMsg)) {
+      if (window.confirm('Double Check: Require confirmation to proceed with BULK DELETION.')) {
+        const loadingToast = toast.loading('Deleting old bills...');
+        try {
+          const result = await billingService.deleteOldBills(startDate);
+          toast.success(`Deleted ${result.deletedCount} old bills.`);
+          loadBills();
+        } catch (error) {
+          console.error('Delete error', error);
+          toast.error('Failed to delete old bills');
+        } finally {
+          toast.dismiss(loadingToast);
+        }
       }
+    }
+  };
 
-      // Fetch sales report data
-      const response = await billingService.getBills({
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString()
-      });
+  const handleDownloadReport = async (type = 'csv') => {
+    try {
+      toast.loading(`Generating ${type.toUpperCase()} report...`);
+      // Use current filters
+      const params = {
+        startDate,
+        endDate,
+        paymentMethod: paymentFilter,
+        status: statusFilter,
+        hsnCode: hsnFilter,
+        search: searchTerm,
+        limit: 5000 // Increase limit for export
+      };
 
+      const response = await billingService.getBills(params); // Use getBills to respect all filters
       const reportData = response.data || [];
 
-      // Generate CSV content
-      const csvContent = generateCSVReport(reportData, filterPeriod);
+      if (reportData.length === 0) {
+        toast.dismiss();
+        toast.error('No data to export');
+        return;
+      }
 
-      // Download CSV file
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `sales-report-${filterPeriod}-${new Date().toISOString().split('T')[0]}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      if (type === 'csv') {
+        const csvContent = generateCSVReport(reportData);
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `sales_report_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        // Simple PDF logic (Printing the list)
+        // For a true PDF, we'd need a library. 
+        // Alternative: Open a print window with table data
+        printReport(reportData);
+      }
 
       toast.dismiss();
-      toast.success('Sales report downloaded successfully!');
+      toast.success('Report generated!');
     } catch (error) {
       console.error('Error downloading report:', error);
       toast.dismiss();
-      toast.error('Failed to download sales report');
+      toast.error('Failed to generate report');
     }
   };
 
-  const generateCSVReport = (bills, period) => {
-    // Calculate summary statistics
-    const totalSales = bills.reduce((sum, bill) => sum + bill.total, 0);
-    const billCount = bills.length;
-
-    // Group by payment method
-    const paymentMethods = bills.reduce((acc, bill) => {
-      const method = bill.paymentMethod;
-      if (!acc[method]) {
-        acc[method] = { count: 0, amount: 0 };
+  const printReport = (data) => {
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    // Flatten items for report
+    const flatRows = [];
+    data.forEach(bill => {
+      // If bill has items, add each; else add bill info with empty product cells
+      if (bill.items && bill.items.length > 0) {
+        bill.items.forEach(item => {
+          flatRows.push({
+            date: new Date(bill.createdAt).toLocaleDateString(),
+            billNo: bill.billNumber,
+            customer: bill.customerName,
+            payment: bill.paymentMethod,
+            status: bill.status,
+            product: item.name,
+            hsn: item.hsnCode || 'N/A',
+            qty: item.quantity,
+            price: item.price,
+            total: item.total
+          });
+        });
+      } else {
+        flatRows.push({
+          date: new Date(bill.createdAt).toLocaleDateString(),
+          billNo: bill.billNumber,
+          customer: bill.customerName,
+          payment: bill.paymentMethod,
+          status: bill.status,
+          product: '-',
+          hsn: '-',
+          qty: 0,
+          price: 0,
+          total: bill.total
+        });
       }
-      acc[method].count++;
-      acc[method].amount += bill.total;
-      return acc;
-    }, {});
-
-    // CSV Header
-    let csvContent = '\uFEFF'; // BOM for Excel compatibility
-    csvContent += `Sales Report - ${period.charAt(0).toUpperCase() + period.slice(1)}\n`;
-    csvContent += `Generated on: ${new Date().toLocaleString()}\n\n`;
-
-    // Summary Section
-    csvContent += 'SUMMARY\n';
-    csvContent += `Report Period,${period.charAt(0).toUpperCase() + period.slice(1)}\n`;
-    csvContent += `Total Bills,${billCount}\n`;
-    csvContent += `Total Sales,₹${totalSales.toLocaleString()}\n`;
-    csvContent += `Average Bill Value,₹${billCount > 0 ? (totalSales / billCount).toFixed(2) : 0}\n\n`;
-
-    // Payment Methods Section
-    csvContent += 'PAYMENT METHODS BREAKDOWN\n';
-    csvContent += 'Method,Bills Count,Total Amount,Percentage\n';
-    Object.entries(paymentMethods).forEach(([method, data]) => {
-      const percentage = totalSales > 0 ? ((data.amount / totalSales) * 100).toFixed(1) : 0;
-      csvContent += `${method},${data.count},₹${data.amount.toLocaleString()},${percentage}%\n`;
-    });
-    csvContent += '\n';
-
-    // Staff Performance Section
-    const staffPerformance = bills.reduce((acc, bill) => {
-      const staffName = bill.staffName;
-      if (!acc[staffName]) {
-        acc[staffName] = { count: 0, amount: 0 };
-      }
-      acc[staffName].count++;
-      acc[staffName].amount += bill.total;
-      return acc;
-    }, {});
-
-    csvContent += 'STAFF PERFORMANCE\n';
-    csvContent += 'Staff Name,Bills Count,Total Sales,Average Bill Value\n';
-    Object.entries(staffPerformance).forEach(([staff, data]) => {
-      const avgBill = data.count > 0 ? (data.amount / data.count).toFixed(2) : 0;
-      csvContent += `"${staff}",${data.count},₹${data.amount.toLocaleString()},₹${avgBill}\n`;
-    });
-    csvContent += '\n';
-
-    // Bills Detail Section
-    csvContent += 'BILL DETAILS\n';
-    csvContent += 'Bill Number,Customer Name,Customer Phone,Items Count,Total,Payment Method,Staff,Date,Time\n';
-
-    bills.forEach(bill => {
-      const date = new Date(bill.createdAt);
-      csvContent += `${bill.billNumber},`;
-      csvContent += `"${bill.customerName}",`;
-      csvContent += `${bill.customerPhone},`;
-      csvContent += `${bill.items.length},`;
-      csvContent += `₹${bill.total.toLocaleString()},`;
-      csvContent += `${bill.paymentMethod},`;
-      csvContent += `"${bill.staffName}",`;
-      csvContent += `${date.toLocaleDateString()},`;
-      csvContent += `${date.toLocaleTimeString()}\n`;
     });
 
-    return csvContent;
+    const html = `
+        <html>
+        <head>
+            <title>Sales Report</title>
+            <style>
+                body { font-family: sans-serif; padding: 20px; font-size: 11px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th, td { border: 1px solid #ddd; padding: 5px; text-align: left; }
+                th { background-color: #f2f2f2; font-weight: bold; }
+                header { text-align: center; margin-bottom: 20px; }
+                h1 { margin: 0; font-size: 20px; }
+                .summary { margin-top: 5px; font-size: 13px; color: #555; }
+            </style>
+        </head>
+        <body>
+            <header>
+                <h1>Sales Report</h1>
+                <div class="summary">
+                    <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+                    <p><strong>Total Bills:</strong> ${data.length} | <strong>Total Sales:</strong> ₹${data.reduce((s, b) => s + b.total, 0).toLocaleString()}</p>
+                </div>
+            </header>
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 80px;">Date</th>
+                        <th style="width: 100px;">Bill #</th>
+                        <th>Customer</th>
+                        <th style="width: 200px;">Product</th>
+                        <th style="width: 80px;">HSN</th>
+                        <th style="width: 40px;">Qty</th>
+                        <th style="width: 60px;">Amount</th>
+                        <th style="width: 60px;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${flatRows.map(row => `
+                        <tr>
+                            <td>${row.date}</td>
+                            <td>${row.billNo}</td>
+                            <td>${row.customer}<br/><span style="color:#888;font-size:9px">${row.payment}</span></td>
+                            <td>${row.product}</td>
+                            <td>${row.hsn}</td>
+                            <td>${row.qty}</td>
+                            <td>₹${row.price}</td>
+                            <td>₹${row.total}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            <script>window.print();</script>
+        </body>
+        </html>
+      `;
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
-  const filteredBills = bills.filter(bill => {
-    const matchesSearch = bill.billNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bill.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bill.customerPhone.includes(searchTerm);
+  const generateCSVReport = (bills) => {
+    // CSV Header with Product Details
+    let csv = `Bill Number,Date,Customer,Phone,Product Name,HSN Code,Quantity,Price,Total,Bill Amount,Payment,Status\n`;
 
-    if (filterPeriod === 'today') {
-      const today = new Date().toDateString();
-      return matchesSearch && new Date(bill.createdAt).toDateString() === today;
-    }
-    if (filterPeriod === 'week') {
-      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      return matchesSearch && new Date(bill.createdAt) >= weekAgo;
-    }
-    if (filterPeriod === 'month') {
-      const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      return matchesSearch && new Date(bill.createdAt) >= monthAgo;
-    }
-    return matchesSearch;
-  });
+    bills.forEach(b => {
+      const date = new Date(b.createdAt).toLocaleDateString();
+      // Format phone as formula to enforce text in Excel
+      const phone = b.customerPhone ? `="${b.customerPhone}"` : 'N/A';
+      // Format Bill Number and Date as formula to avoid Scientific Notation & Hash Width Issues
+      const billNo = `="${b.billNumber}"`;
+      const dateStr = `="${date}"`;
 
-  const totalSales = filteredBills.reduce((sum, bill) => sum + bill.total, 0);
+      if (b.items && b.items.length > 0) {
+        b.items.forEach(item => {
+          // sanitize strings
+          const cleanName = (item.name || '').replace(/,/g, ' ');
+          const hsn = item.hsnCode || 'N/A';
+          // Using explicit text formula for BillNo and Date
+          csv += `${billNo},${dateStr},"${b.customerName}",${phone},"${cleanName}",${hsn},${item.quantity},${item.price},${item.total},${b.total},${b.paymentMethod},${b.status}\n`;
+        });
+      } else {
+        // Fallback for empty items (shouldn't happen for valid bills)
+        csv += `${billNo},${dateStr},"${b.customerName}",${phone},N/A,N/A,0,0,0,${b.total},${b.paymentMethod},${b.status}\n`;
+      }
+    });
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
+    return csv;
+  };
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Bill History</h1>
-          <p className="text-gray-600 mt-2">View and manage all transactions</p>
+          <p className="text-gray-600 mt-2">Manage transactions & reports</p>
         </div>
-        <button
-          onClick={handleDownloadReport}
-          className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Download Report
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => handleDownloadReport('csv')}
+            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+          >
+            <Download className="h-4 w-4 mr-2" /> Excel
+          </button>
+          <button
+            onClick={() => handleDownloadReport('pdf')}
+            className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            <FileText className="h-4 w-4 mr-2" /> PDF
+          </button>
+          <button
+            onClick={handleDeleteOldBills}
+            className="flex items-center px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900"
+            title="Delete bills older than selected 'From Date'"
+          >
+            <Trash2 className="h-4 w-4 mr-2" /> Cleanup Old Data
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <Receipt className="h-8 w-8 text-blue-600" />
-              <div className="ml-4">
-                <p className="text-2xl font-bold">{filteredBills.length}</p>
-                <p className="text-gray-600">Total Bills</p>
-              </div>
+          <CardContent className="p-6 flex items-center">
+            <Receipt className="h-8 w-8 text-blue-600 mr-4" />
+            <div>
+              <p className="text-2xl font-bold">{stats.count}</p>
+              <p className="text-gray-600">Total Bills</p>
             </div>
           </CardContent>
         </Card>
-
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <DollarSign className="h-8 w-8 text-green-600" />
-              <div className="ml-4">
-                <p className="text-2xl font-bold">₹{totalSales.toLocaleString()}</p>
-                <p className="text-gray-600">Total Sales</p>
-              </div>
+          <CardContent className="p-6 flex items-center">
+            <DollarSign className="h-8 w-8 text-green-600 mr-4" />
+            <div>
+              <p className="text-2xl font-bold">₹{stats.sales.toLocaleString()}</p>
+              <p className="text-gray-600">Total Revenue</p>
             </div>
           </CardContent>
         </Card>
-
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <DollarSign className="h-8 w-8 text-purple-600" />
-              <div className="ml-4">
-                <p className="text-2xl font-bold">₹{(totalSales / filteredBills.length || 0).toFixed(0)}</p>
-                <p className="text-gray-600">Average Bill</p>
-              </div>
+          <CardContent className="p-6 flex items-center">
+            <DollarSign className="h-8 w-8 text-purple-600 mr-4" />
+            <div>
+              <p className="text-2xl font-bold">₹{stats.average.toFixed(0)}</p>
+              <p className="text-gray-600">Avg. Bill Value</p>
             </div>
           </CardContent>
         </Card>
       </div>
 
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-4">
+          {/* Filters Row 1: Search & Dates */}
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <Search className="absolute left-3 top-2.5 text-gray-400 h-5 w-5" />
               <input
                 type="text"
-                placeholder="Search by bill number, customer name, or phone..."
+                placeholder="Search Bill #, Customer, Phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div className="flex items-center space-x-2">
-              <Calendar className="h-4 w-4 text-gray-400" />
-              <select
-                value={filterPeriod}
-                onChange={(e) => setFilterPeriod(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">All Time</option>
-                <option value="today">Today</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-              </select>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">From:</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="border rounded-lg px-3 py-2"
+              />
             </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">To:</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="border rounded-lg px-3 py-2"
+              />
+            </div>
+          </div>
+
+          {/* Filters Row 2: Dropdowns */}
+          <div className="flex flex-col md:flex-row gap-4">
+            <select
+              value={paymentFilter}
+              onChange={(e) => setPaymentFilter(e.target.value)}
+              className="border rounded-lg px-3 py-2 flex-1"
+            >
+              <option value="all">All Payment Modes</option>
+              <option value="cash">Cash</option>
+              <option value="upi">UPI</option>
+              <option value="card">Card</option>
+              <option value="mix">Mix</option>
+            </select>
+
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="border rounded-lg px-3 py-2 flex-1"
+            >
+              <option value="all">All Statuses</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+
+            <input
+              type="text"
+              placeholder="Filter by HSN Code"
+              value={hsnFilter}
+              onChange={(e) => setHsnFilter(e.target.value)}
+              className="border rounded-lg px-3 py-2 flex-1"
+            />
+
+            {/* Clear Filters Button */}
+            {(startDate || endDate || paymentFilter !== 'all' || statusFilter !== 'all' || hsnFilter) && (
+              <button
+                onClick={() => {
+                  setStartDate('');
+                  setEndDate('');
+                  setPaymentFilter('all');
+                  setStatusFilter('all');
+                  setHsnFilter('');
+                  setSearchTerm('');
+                }}
+                className="text-red-600 hover:text-red-800 text-sm font-medium px-2"
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -446,54 +543,34 @@ const BillHistoryPage = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Bill Details
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Customer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Items
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Amount
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Payment
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bill #</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Products</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredBills.map((bill) => (
+                {bills.map((bill) => (
                   <tr key={bill._id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{bill.billNumber}</div>
-                        <div className="text-sm text-gray-500">by {bill.staffName}</div>
-                      </div>
+                      <div className="font-medium">{bill.billNumber}</div>
+                      {bill.status === 'cancelled' && <span className="text-xs text-red-600 font-bold">CANCELLED</span>}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{bill.customerName}</div>
-                        <div className="text-sm text-gray-500">{bill.customerPhone}</div>
-                      </div>
+                      <div>{bill.customerName}</div>
+                      <div className="text-xs text-gray-500">{bill.customerPhone}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        {bill.items.length} item{bill.items.length > 1 ? 's' : ''}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        {bill.items.some(item => item.isComboApplied || item.isCombo) && (
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-                            Combo
-                          </span>
-                        )}
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900 line-clamp-2" title={bill.items.map(i => `${i.name} (${i.hsnCode || 'N/A'})`).join(', ')}>
+                        {bill.items.slice(0, 2).map((item, idx) => (
+                          <div key={idx} className="truncate max-w-[200px]">
+                            {item.name} <span className="text-xs text-gray-500">[{item.hsnCode || 'No HSN'}]</span>
+                          </div>
+                        ))}
+                        {bill.items.length > 2 && <span className="text-xs text-gray-500">+{bill.items.length - 2} more...</span>}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -517,20 +594,11 @@ const BillHistoryPage = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleViewDetails(bill)}
-                          className="text-blue-600 hover:text-blue-900 transition-colors"
-                          title="View Details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handlePrintBill(bill)}
-                          className="text-green-600 hover:text-green-900 transition-colors"
-                          title="Print Bill"
-                        >
-                          <Receipt className="h-4 w-4" />
-                        </button>
+                        <button onClick={() => handleViewDetails(bill)} className="text-blue-600"><Eye className="h-4 w-4" /></button>
+                        <button onClick={() => handlePrintBill(bill)} className="text-green-600"><Receipt className="h-4 w-4" /></button>
+                        {bill.status !== 'cancelled' && (
+                          <button onClick={() => handleCancelBill(bill)} className="text-red-600"><XCircle className="h-4 w-4" /></button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -541,179 +609,55 @@ const BillHistoryPage = () => {
         </CardContent>
       </Card>
 
-      {filteredBills.length === 0 && !loading && (
-        <Card>
-          <CardContent className="p-12 text-center">
-            <Receipt className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No bills found</h3>
-            <p className="text-gray-600">Try adjusting your search or filter criteria</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Bill Details Modal */}
+      {/* Detail Modal Reused logic here ideally or strictly render if showDetails true */}
       {showDetails && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-96 overflow-y-auto">
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-medium">Bill Details - {selectedBill.billNumber}</h3>
-                <button
-                  onClick={() => setShowDetails(false)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-600">Customer</p>
-                    <p className="font-medium">{selectedBill.customerName}</p>
-                    <p className="text-sm text-gray-600">{selectedBill.customerPhone}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Staff</p>
-                    <p className="font-medium">{selectedBill.staffName}</p>
-                  </div>
-                </div>
-
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6">
+            <div className="flex justify-between mb-4">
+              <h2 className="text-xl font-bold">Bill {selectedBill.billNumber}</h2>
+              <button onClick={() => setShowDetails(false)}>✕</button>
+            </div>
+            {/* Details Content reused from previous implementation */}
+            <div className="space-y-4">
+              <div className="grid grid-cols-2">
                 <div>
-                  <p className="text-sm text-gray-600 mb-2">Items</p>
-                  <div className="border rounded-lg">
-                    {selectedBill.items.map((item, index) => (
-                      <div key={index} className="flex justify-between items-center p-3 border-b last:border-b-0">
-                        <div>
-                          <p className="font-medium">{item.name}</p>
-                          {(item.isComboApplied || item.isCombo) && (
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-                                {item.appliedComboName || 'Combo'}
-                              </span>
-                              {item.comboSavings > 0 && (
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                  Saved ₹{item.comboSavings.toLocaleString()}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p>{item.quantity} × ₹{item.price}</p>
-                          <p className="font-medium">₹{item.total}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <p className="text-gray-600">Customer</p>
+                  <p className="font-bold">{selectedBill.customerName}</p>
+                  <p>{selectedBill.customerPhone}</p>
                 </div>
-
-                {/* Combo Summary */}
-                {selectedBill.combos && selectedBill.combos.length > 0 && (
-                  <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                    <h4 className="font-medium text-green-800 mb-2">Applied Combos</h4>
-                    {selectedBill.combos.map((combo, index) => (
-                      <div key={index} className="flex justify-between text-sm text-green-700 mb-1">
-                        <span>⭐ {combo.name || combo.comboName}</span>
-                        <span>₹{combo.offerPrice ? combo.offerPrice.toLocaleString() : 'N/A'}</span>
+                <div className="text-right">
+                  <p className="text-gray-600">Total</p>
+                  <p className="font-bold text-xl">₹{selectedBill.total}</p>
+                </div>
+              </div>
+              <div>
+                <h3 className="font-bold border-b pb-2">Items</h3>
+                {selectedBill.items.map((item, idx) => (
+                  <div key={idx} className="flex justify-between py-2 border-b last:border-0">
+                    <div>
+                      <div className="font-medium">{item.name}</div>
+                      <div className="text-xs text-gray-500">
+                        HSN: {item.hsnCode || 'N/A'} • Qty: {item.quantity}
                       </div>
-                    ))}
-                    <div className="flex justify-between font-medium text-green-800 border-t border-green-200 pt-2 mt-2">
-                      <span>Total Savings:</span>
-                      <span>₹{selectedBill.items.reduce((sum, item) => sum + (item.comboSavings || 0), 0).toLocaleString()}</span>
                     </div>
+                    <span>₹{item.total}</span>
                   </div>
-                )}
-
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="space-y-2">
-                    {(() => {
-                      const gstData = calculateGSTBreakdown(selectedBill.items || []);
-                      return (
-                        <>
-                          <div className="flex justify-between">
-                            <span>Product Price (Excl. GST):</span>
-                            <span>₹{gstData.totalWithoutGST.toLocaleString()}</span>
-                          </div>
-
-                          {/* GST Breakdown */}
-                          <div className="border-t pt-2">
-                            <div className="text-sm text-gray-600 mb-2">GST Breakdown:</div>
-                            {gstData.sgst5 > 0 && (
-                              <>
-                                <div className="flex justify-between text-sm">
-                                  <span>SGST (2.5%):</span>
-                                  <span>₹{gstData.sgst5.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                  <span>CGST (2.5%):</span>
-                                  <span>₹{gstData.cgst5.toLocaleString()}</span>
-                                </div>
-                              </>
-                            )}
-                            {gstData.sgst12 > 0 && (
-                              <>
-                                <div className="flex justify-between text-sm">
-                                  <span>SGST (6%):</span>
-                                  <span>₹{gstData.sgst12.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                  <span>CGST (6%):</span>
-                                  <span>₹{gstData.cgst12.toLocaleString()}</span>
-                                </div>
-                              </>
-                            )}
-                          </div>
-
-                          {selectedBill.combos && selectedBill.combos.length > 0 && (
-                            <div className="flex justify-between text-green-600 border-t pt-2">
-                              <span>Combo Discount:</span>
-                              <span>-₹{selectedBill.items.reduce((sum, item) => sum + (item.comboSavings || 0), 0).toLocaleString()}</span>
-                            </div>
-                          )}
-
-                          <div className="flex justify-between font-bold text-lg border-t pt-2">
-                            <span>Total Amount (Incl. GST):</span>
-                            <span>₹{selectedBill.total.toLocaleString()}</span>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm text-gray-600">Payment Method</p>
-                    <p className="font-medium">{selectedBill.paymentMethod}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-gray-600">Date & Time</p>
-                    <p className="font-medium">
-                      {new Date(selectedBill.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
-
-              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t">
-                <button
-                  onClick={() => setShowDetails(false)}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => handlePrintBill(selectedBill)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Print Bill
-                </button>
+              {/* Simplified GST Display for modal to save complexity code duplication */}
+              <div className="bg-gray-100 p-3 rounded">
+                <p className="flex justify-between"><span>Subtotal:</span> <span>₹{selectedBill.subtotal}</span></p>
+                <p className="flex justify-between"><span>Tax:</span> <span>₹{selectedBill.tax}</span></p>
+                <p className="flex justify-between font-bold border-t border-gray-300 mt-2 pt-2"><span>Total:</span> <span>₹{selectedBill.total}</span></p>
               </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <button onClick={() => handlePrintBill(selectedBill)} className="bg-blue-600 text-white px-4 py-2 rounded">Print</button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };

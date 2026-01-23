@@ -1,6 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const Billing = require('../models/Billing');
 const Product = require('../models/Product');
+const Wallet = require('../models/Wallet');
 
 // Create a new bill
 const createBill = asyncHandler(async (req, res) => {
@@ -78,6 +79,8 @@ const createBill = asyncHandler(async (req, res) => {
         product: item.product || item._id,
         productName: item.productName || item.name,
         productCode: item.productCode || item.code || item.sku || 'N/A',
+        // Capture HSN Code from request or fallback
+        hsnCode: item.hsnCode || item.pricing?.hsnCode || 'N/A',
         quantity: Number(item.quantity) || 1,
         unitPrice: Number(item.unitPrice) || Number(item.price) || 0,
         mrp: Number(item.mrp) || Number(item.originalPrice) || Number(item.unitPrice) || Number(item.price) || 0,
@@ -227,17 +230,38 @@ const createBill = asyncHandler(async (req, res) => {
 // Get all bills
 const getBills = asyncHandler(async (req, res) => {
   try {
-    const { page = 1, limit = 1000, startDate, endDate, search } = req.query;
+    const { page = 1, limit = 1000, startDate, endDate, search, paymentMethod, status, hsnCode } = req.query;
 
     // Build query
     let query = {};
 
     // Date range filter
     if (startDate && endDate) {
+      // Set time to start and end of day respectively if only dates are provided
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
       query.createdAt = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
+        $gte: start,
+        $lte: end
       };
+    }
+
+    // Payment method filter (case insensitive)
+    if (paymentMethod && paymentMethod !== 'all') {
+      query['payment.method'] = { $regex: new RegExp(`^${paymentMethod}$`, 'i') };
+    }
+
+    // Status filter
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    // HSN Code filter (search in items array)
+    if (hsnCode) {
+      query['items.hsnCode'] = { $regex: hsnCode, $options: 'i' };
     }
 
     // Search filter
@@ -251,6 +275,10 @@ const getBills = asyncHandler(async (req, res) => {
 
     const bills = await Billing.find(query)
       .populate('billedBy', 'firstName lastName')
+      .populate({
+        path: 'items.product',
+        select: 'hsnCode'
+      })
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -272,6 +300,7 @@ const getBills = asyncHandler(async (req, res) => {
           price: item.unitPrice,
           mrp: item.mrp,
           total: item.totalAmount,
+          hsnCode: item.hsnCode || item.product?.hsnCode || 'N/A',
           isCombo: item.comboAssignment?.isComboItem || false
         })),
         subtotal: bill.totals?.subtotal || 0,
@@ -353,6 +382,173 @@ const updateBill = asyncHandler(async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to update bill'
+    });
+  }
+});
+
+// Cancel bill (Soft Delete) - Restore stock
+const cancelBill = asyncHandler(async (req, res) => {
+  try {
+    const bill = await Billing.findById(req.params.id);
+
+    if (!bill) {
+      return res.status(404).json({
+        success: false,
+        message: 'Bill not found'
+      });
+    }
+
+    if (bill.status === 'cancelled') {
+      return res.status(400).json({
+        success: false,
+        message: 'Bill is already cancelled'
+      });
+    }
+
+    // 2. Restore Stock
+    console.log(`🔄 Restoring status for Bill ${bill.billNumber}`);
+    for (const item of bill.items) {
+      // Logic from createBill (reversed)
+      try {
+        const product = await Product.findById(item.product);
+
+        if (product) {
+          // Restore product stock
+          const oldStock = product.inventory.currentStock;
+          product.inventory.currentStock = oldStock + item.quantity;
+
+          // Decrease total sold
+          product.totalSold = Math.max(0, (product.totalSold || 0) - item.quantity);
+
+          await product.save();
+          console.log(`✅ Stock restored for ${product.name}: ${oldStock} → ${product.inventory.currentStock} (+${item.quantity})`);
+
+          // If product has parent, restore parent stock
+          if (product.parentProduct) {
+            const parentProduct = await Product.findById(product.parentProduct);
+            if (parentProduct) {
+              const oldParentStock = parentProduct.inventory.currentStock;
+              parentProduct.inventory.currentStock = oldParentStock + item.quantity;
+              parentProduct.totalSold = Math.max(0, (parentProduct.totalSold || 0) - item.quantity);
+              await parentProduct.save();
+              console.log(`✅ Parent stock restored: ${oldParentStock} → ${parentProduct.inventory.currentStock} (+${item.quantity})`);
+            }
+          }
+        }
+      } catch (stockError) {
+        console.error(`⚠️ Failed to restore stock for item ${item.productName}:`, stockError);
+      }
+    }
+
+    // 3. Rollback Wallet Points (Redeemed -> Refund, Earned -> Deduct)
+    if (bill.customer && bill.customer.phone) {
+      try {
+        const wallet = await Wallet.findOne({ phone: bill.customer.phone });
+        if (wallet) {
+          console.log(`💰 Checking wallet for bill ${bill.billNumber}`);
+          const billTransactions = wallet.transactions.filter(t => t.billNumber === bill.billNumber);
+
+          let pointsToRefund = 0; // Points user spent (redeemed) -> Give back
+          let pointsToRevert = 0; // Points user earned -> Take back
+
+          billTransactions.forEach(t => {
+            if (t.type === 'redeemed') {
+              pointsToRefund += t.points;
+            } else if (t.type === 'earned') {
+              pointsToRevert += t.points;
+            }
+          });
+
+          if (pointsToRefund > 0 || pointsToRevert > 0) {
+            console.log(`🔄 Wallet Rollback: Refund ${pointsToRefund}, Revert ${pointsToRevert}`);
+
+            if (pointsToRefund > 0) {
+              wallet.points += pointsToRefund;
+              wallet.transactions.push({
+                type: 'adjustment',
+                points: pointsToRefund,
+                billNumber: bill.billNumber,
+                description: `Refund for cancelled bill ${bill.billNumber}`,
+                date: new Date()
+              });
+            }
+
+            if (pointsToRevert > 0) {
+              // Ensure we don't go negative (though debatable, but technically fair)
+              wallet.points = Math.max(0, wallet.points - pointsToRevert);
+              wallet.transactions.push({
+                type: 'adjustment', // Using adjustment with negative points description
+                points: -pointsToRevert, // Storing as negative for clarity in history if UI supports it, otherwise value
+                billNumber: bill.billNumber,
+                description: `Reversal of earned points for cancelled bill ${bill.billNumber}`,
+                date: new Date()
+              });
+            }
+
+            await wallet.save();
+            console.log(`✅ Wallet updated. New Balance: ${wallet.points}`);
+          }
+        }
+      } catch (walletError) {
+        console.error('⚠️ Failed to rollback wallet points:', walletError);
+      }
+    }
+
+    // 4. Update Bill Status
+    bill.status = 'cancelled';
+    bill.notes = (bill.notes ? bill.notes + '\n' : '') + `Cancelled on ${new Date().toLocaleString()}`;
+
+    await bill.save();
+
+    res.json({
+      success: true,
+      message: 'Bill cancelled, stock restored, and wallet points adjusted',
+      data: bill
+    });
+
+  } catch (error) {
+    console.error('Error cancelling bill:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel bill'
+    });
+  }
+});
+
+// Bulk delete bills older than a specific date
+const deleteOldBills = asyncHandler(async (req, res) => {
+  try {
+    const { olderThanDate } = req.body;
+
+    if (!olderThanDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a date (olderThanDate) to delete bills before'
+      });
+    }
+
+    const dateLimit = new Date(olderThanDate);
+
+    // Safety check - prevent deleting recent bills (e.g., within last 30 days) accidentally?
+    // User requested "Delete old bills option for data overload", assuming intentional bulk delete.
+
+    const result = await Billing.deleteMany({
+      createdAt: { $lt: dateLimit }
+    });
+
+    console.log(`🗑️ Deleted ${result.deletedCount} bills older than ${dateLimit.toISOString()}`);
+
+    res.json({
+      success: true,
+      message: `Successfully deleted ${result.deletedCount} old bills`,
+      deletedCount: result.deletedCount
+    });
+
+  } catch (error) {
+    console.error('Error deleting old bills:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete old bills'
     });
   }
 });
@@ -495,8 +691,10 @@ module.exports = {
   getBills,
   getBill,
   updateBill,
+  cancelBill,
   deleteBill,
   generateInvoice,
   getDailySales,
-  getStaffSales
+  getStaffSales,
+  deleteOldBills
 };
