@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://api.techentia.in/api'
+const API_URL = import.meta.env.VITE_API_URL || 'https://api.techentia.in/api'
 
 // Create axios instance
 const api = axios.create({
