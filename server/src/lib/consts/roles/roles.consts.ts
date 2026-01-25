@@ -10,7 +10,7 @@ export const SYSTEM_ROLES = [
     "TENANT_ADMIN",
     "BRANCH_MANAGER",
     "BILLING_STAFF",
-    "SALES_GIRL",
+    "SALES_PERSON",
 
     // --- External ---
     "INFLUENCER",
@@ -27,7 +27,7 @@ export const INTERNAL_ROLES = [
     Role.TENANT_ADMIN,
     Role.BRANCH_MANAGER,
     Role.BILLING_STAFF,
-    Role.SALES_GIRL,
+    Role.SALES_PERSON,
 ] as const;
 
 export type TInternalRole = (typeof INTERNAL_ROLES)[number];

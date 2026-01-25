@@ -383,7 +383,7 @@ export const ROLE_PERMISSIONS = {
         Permission["incentive:earn"],
     ],
 
-    [Role.SALES_GIRL]: [
+    [Role.SALES_PERSON]: [
         Permission["billing:create"],
         Permission["billing:read"],
 

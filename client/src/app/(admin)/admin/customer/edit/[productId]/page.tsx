@@ -1,0 +1,1 @@
+// @/app/(admin)/admin/products/edit/[productId]/page.tsx
