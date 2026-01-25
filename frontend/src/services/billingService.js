@@ -31,6 +31,18 @@ const billingService = {
     return response.data
   },
 
+  // Cancel bill (Soft Delete)
+  cancelBill: async (id) => {
+    const response = await api.post(`/billing/${id}/cancel`)
+    return response.data
+  },
+
+  // Delete old bills (Bulk Cleanup)
+  deleteOldBills: async (date) => {
+    const response = await api.delete('/billing/cleanup', { data: { olderThanDate: date } })
+    return response.data
+  },
+
   // Generate invoice
   generateInvoice: async (id) => {
     const response = await api.get(`/billing/${id}/invoice`)

@@ -1021,6 +1021,7 @@ const POSBillingPage = () => {
             quantity: quantityForSingles,
             price: item.pricing?.offerPrice || item.price || 0,
             originalPrice: item.pricing?.mrp || item.price || 0,
+            hsnCode: item.hsnCode || item.pricing?.hsnCode || 'N/A', // Explicitly add HSN
             isComboApplied: false
           });
         }
@@ -1039,6 +1040,7 @@ const POSBillingPage = () => {
                 quantity: slot.assigned.qty,
                 price: adjustedPrice,
                 originalPrice: slot.assigned.product.pricing?.discountedPrice || slot.assigned.product.pricing?.offerPrice || 0,
+                hsnCode: slot.assigned.product.hsnCode || slot.assigned.product.pricing?.hsnCode || 'N/A', // Explicitly add HSN
                 isComboApplied: true,
                 appliedComboName: combo.name,
                 comboPrice: adjustedPrice
@@ -1114,6 +1116,7 @@ const POSBillingPage = () => {
             product: item._id,
             productName: item.name,
             productCode: item.productCode || item.code || 'N/A',
+            hsnCode: item.hsnCode || item.pricing?.hsnCode || 'N/A',
             quantity: item.quantity,
             unitPrice: item.price,
             mrp: item.originalPrice || item.price,

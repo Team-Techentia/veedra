@@ -6,9 +6,11 @@ const {
   getBill,
   updateBill,
   deleteBill,
+  cancelBill,
   generateInvoice,
   getDailySales,
-  getStaffSales
+  getStaffSales,
+  deleteOldBills
 } = require('../controllers/billingController');
 
 const router = express.Router();
@@ -21,10 +23,15 @@ router.route('/')
   .get(getBills)
   .post(createBill);
 
+router.delete('/cleanup', deleteOldBills);
+
 router.route('/:id')
   .get(getBill)
   .put(updateBill)
   .delete(deleteBill);
+
+router.route('/:id/cancel')
+  .post(cancelBill);
 
 router.get('/:id/invoice', generateInvoice);
 router.get('/reports/daily', getDailySales);

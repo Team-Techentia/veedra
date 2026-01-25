@@ -18,15 +18,15 @@ const ViewProductsPage = () => {
   const printRef = useRef();
 
   // Get sticker dimensions based on selected size
-const getStickerDimensions = (size) => {
-  return { 
-    width: '75mm', 
-    height: '50mm', 
-    fontSize: '9px', 
-    barcodeHeight: '22',
-    barcodeWidth: '1.0'
+  const getStickerDimensions = (size) => {
+    return {
+      width: '75mm',
+      height: '50mm',
+      fontSize: '9px',
+      barcodeHeight: '22',
+      barcodeWidth: '1.0'
+    };
   };
-};
 
   useEffect(() => {
     loadProducts();
@@ -37,15 +37,15 @@ const getStickerDimensions = (size) => {
       setLoading(true);
       const response = await productService.getProducts();
       const allProducts = response.data || response || [];
-      
+
       // Separate parent and child products
       const parents = allProducts.filter(p => p.type === 'parent' || p.type === 'standalone');
       const children = allProducts.filter(p => p.type === 'child');
-      
+
       // Find orphaned children
       const parentIds = new Set(parents.map(p => p._id));
       const orphanedChildren = children.filter(child => !child.parentProduct || !parentIds.has(child.parentProduct));
-      
+
       // Group children by parent
       const childrenByParent = {};
       children.forEach(child => {
@@ -74,10 +74,10 @@ const getStickerDimensions = (size) => {
       const allDisplayProducts = [...enrichedParents, ...orphanedAsStandalone];
       setParentProducts(allDisplayProducts);
       setProducts(allProducts);
-      
+
       // Clear expanded bundles state to ensure all bundles are collapsed after reload
       setExpandedBundles(new Set());
-      
+
     } catch (error) {
       toast.error('Failed to load products');
     } finally {
@@ -87,14 +87,14 @@ const getStickerDimensions = (size) => {
 
   // Generate barcodes using JsBarcode (matching HTML version approach)
   const generateBarcodeRef = useRef();
-  
+
   const renderBarcode = (element, code) => {
     if (!element || !code || !window.JsBarcode) return;
-    
+
     try {
       // Clear any existing content
       element.innerHTML = '';
-      
+
       window.JsBarcode(element, code, {
         format: "CODE128",
         width: 1.3,
@@ -109,7 +109,7 @@ const getStickerDimensions = (size) => {
         fontSize: 10,
         fontOptions: "",
         font: "monospace",
-        valid: function(valid) {
+        valid: function (valid) {
           if (!valid) {
             console.warn('Invalid barcode for code:', code);
           }
@@ -137,36 +137,36 @@ const getStickerDimensions = (size) => {
     const barcodeData = code.replace(/[^0-9]/g, '').padStart(12, '0').substring(0, 12);
     const checkDigit = calculateEAN13CheckDigit(barcodeData);
     const fullBarcode = barcodeData + checkDigit;
-    
+
     // Simple EAN-13 pattern generation
     const patterns = {
       'L': ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'],
       'G': ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'],
       'R': ['1110010', '1100110', '1101100', '1000010', '1011100', '1001110', '1010000', '1000100', '1001000', '1110100']
     };
-    
+
     const firstDigitPatterns = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
-    
+
     let svg = '<svg width="200" height="50" xmlns="http://www.w3.org/2000/svg">';
     svg += '<rect width="200" height="50" fill="white"/>';
-    
+
     let x = 10;
     const barWidth = 1.5;
-    
+
     // Start guard
     svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
     x += barWidth * 2;
     svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
     x += barWidth * 2;
-    
+
     // Left group
     const firstDigit = parseInt(fullBarcode[0]);
     const leftPattern = firstDigitPatterns[firstDigit];
-    
+
     for (let i = 1; i <= 6; i++) {
       const digit = parseInt(fullBarcode[i]);
-      const pattern = patterns[leftPattern[i-1]][digit];
-      
+      const pattern = patterns[leftPattern[i - 1]][digit];
+
       for (let j = 0; j < 7; j++) {
         if (pattern[j] === '1') {
           svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
@@ -174,19 +174,19 @@ const getStickerDimensions = (size) => {
         x += barWidth;
       }
     }
-    
+
     // Center guard
     x += barWidth;
     svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
     x += barWidth * 2;
     svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
     x += barWidth * 2;
-    
+
     // Right group
     for (let i = 7; i <= 12; i++) {
       const digit = parseInt(fullBarcode[i]);
       const pattern = patterns['R'][digit];
-      
+
       for (let j = 0; j < 7; j++) {
         if (pattern[j] === '1') {
           svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
@@ -194,14 +194,14 @@ const getStickerDimensions = (size) => {
         x += barWidth;
       }
     }
-    
+
     // End guard
     svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
     x += barWidth * 2;
     svg += `<rect x="${x}" y="5" width="${barWidth}" height="35" fill="black"/>`;
-    
+
     svg += '</svg>';
-    
+
     return 'data:image/svg+xml;base64,' + btoa(svg);
   };
 
@@ -226,7 +226,7 @@ const getStickerDimensions = (size) => {
   };
 
   // Filter products based on search
-  const filteredProducts = parentProducts.filter(product => 
+  const filteredProducts = parentProducts.filter(product =>
     product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     product.code?.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -250,7 +250,7 @@ const getStickerDimensions = (size) => {
   const toggleSelection = (productId) => {
     const newSelected = new Set(selectedProducts);
     const product = parentProducts.find(p => p._id === productId);
-    
+
     if (newSelected.has(productId)) {
       // Deselecting - remove product and all its children
       newSelected.delete(productId);
@@ -287,35 +287,35 @@ const getStickerDimensions = (size) => {
   };
 
   const printSelected = () => {
-  if (selectedProducts.size === 0) {
-    toast.error('Please select products to print');
-    return;
-  }
-
-  const selectedProductsData = [];
-  // Get all products (parents and children) that are selected
-  parentProducts.forEach(parent => {
-    if (selectedProducts.has(parent._id)) {
-      selectedProductsData.push(parent);
+    if (selectedProducts.size === 0) {
+      toast.error('Please select products to print');
+      return;
     }
-    if (parent.children) {
-      parent.children.forEach(child => {
-        if (selectedProducts.has(child._id)) {
-          selectedProductsData.push(child);
-        }
-      });
+
+    const selectedProductsData = [];
+    // Get all products (parents and children) that are selected
+    parentProducts.forEach(parent => {
+      if (selectedProducts.has(parent._id)) {
+        selectedProductsData.push(parent);
+      }
+      if (parent.children) {
+        parent.children.forEach(child => {
+          if (selectedProducts.has(child._id)) {
+            selectedProductsData.push(child);
+          }
+        });
+      }
+    });
+
+    if (selectedProductsData.length === 0) {
+      toast.error('No products selected to print');
+      return;
     }
-  });
 
-  if (selectedProductsData.length === 0) {
-    toast.error('No products selected to print');
-    return;
-  }
+    const generateStickerHTML = (list) => {
+      const dimensions = getStickerDimensions(stickerSize);
 
-  const generateStickerHTML = (list) => {
-    const dimensions = getStickerDimensions(stickerSize);
-    
-    const styles = `
+      const styles = `
 <style>
   @page {
     size: 75mm 50mm;
@@ -405,13 +405,13 @@ const getStickerDimensions = (size) => {
 `;
       const body = list.map((p, i) => {
         // Check if this is a combo product - check multiple possible fields
-        const isCombo = p.type === 'combo' || 
-                       p.comboType || 
-                       p.isCombo || 
-                       (p.rules && p.rules.slots) ||
-                       p.offerPrice ||
-                       (p.sku && p.sku.startsWith('CMB'));
-        
+        const isCombo = p.type === 'combo' ||
+          p.comboType ||
+          p.isCombo ||
+          (p.rules && p.rules.slots) ||
+          p.offerPrice ||
+          (p.sku && p.sku.startsWith('CMB'));
+
         if (isCombo) {
           // Combo sticker format
           return `
@@ -431,11 +431,10 @@ const getStickerDimensions = (size) => {
                   <span>${p.comboType || p.type || ''}</span>
                 </div>
                 <div class="price-info">
-                  <div><strong>Price Slots:</strong> ${
-                    p.priceSlots || 
-                    (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
-                    '₹350–400 | ₹430–500 | ₹700–730'
-                  }</div>
+                  <div><strong>Price Slots:</strong> ${p.priceSlots ||
+            (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
+            '₹350–400 | ₹430–500 | ₹700–730'
+            }</div>
                   <div><strong>Combo Offer Price:</strong> ₹${p.offerPrice || p.pricing?.offerPrice || '999'}</div>
                 </div>
               </div>
@@ -497,17 +496,17 @@ const getStickerDimensions = (size) => {
     printWindow.document.close();
   };
 
-const printSingleProduct = (product) => {
-  const generateStickerHTML = (p) => {
-    const dimensions = getStickerDimensions(stickerSize);
-    const isCombo = p.type === 'combo' || 
-                   p.comboType || 
-                   p.isCombo || 
-                   (p.rules && p.rules.slots) ||
-                   p.offerPrice ||
-                   (p.sku && p.sku.startsWith('CMB'));
-    
-    const styles = `
+  const printSingleProduct = (product) => {
+    const generateStickerHTML = (p) => {
+      const dimensions = getStickerDimensions(stickerSize);
+      const isCombo = p.type === 'combo' ||
+        p.comboType ||
+        p.isCombo ||
+        (p.rules && p.rules.slots) ||
+        p.offerPrice ||
+        (p.sku && p.sku.startsWith('CMB'));
+
+      const styles = `
 <style>
   @page {
     size: 75mm 50mm;
@@ -540,7 +539,7 @@ const printSingleProduct = (product) => {
   }
   
   .product-info {
-    font-size: ${parseInt(dimensions.fontSize) +4}px;
+    font-size: ${parseInt(dimensions.fontSize) + 4}px;
     line-height: 1.4;
   }
   
@@ -584,7 +583,7 @@ const printSingleProduct = (product) => {
   }
 </style>
 `;
-    // ... baaki code same rahega
+      // ... baaki code same rahega
 
       const body = isCombo ? `
         <div class="sticker">
@@ -603,11 +602,10 @@ const printSingleProduct = (product) => {
               <span>${p.comboType || p.type || ''}</span>
             </div>
             <div class="price-info">
-              <div><strong>Price Slots:</strong> ${
-                p.priceSlots || 
-                (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
-                '₹350–400 | ₹430–500 | ₹700–730'
-              }</div>
+              <div><strong>Price Slots:</strong> ${p.priceSlots ||
+        (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
+        '₹350–400 | ₹430–500 | ₹700–730'
+        }</div>
               <div><strong>Combo Offer Price:</strong> ₹${p.offerPrice || p.pricing?.offerPrice || '999'}</div>
             </div>
           </div>
@@ -728,81 +726,82 @@ const printSingleProduct = (product) => {
     };
 
     return (
-  <tr
-    key={product._id}
-    className={isChild ? 'child-row' : (hasChildren ? 'parent-row' : '')}
-    onClick={handleRowClick}
-  >
-    <td>{isChild ? '' : globalIndex}</td>
-    <td>
-      <input
-        type="checkbox"
-        checked={selectedProducts.has(product._id)}
-        onChange={() => toggleSelection(product._id)}
-        onClick={e => e.stopPropagation()}
-      />
-    </td>
-    <td>
-      {hasChildren && (
-        <span className="toggle-icon">
-          {expandedBundles.has(product._id) ? '➖' : '➕'}
-        </span>
-      )}
-    </td>
-    <td>{product.name}</td>
-    <td>{product.code}</td>
-    <td>{product.category?.name || '-'}</td>
-    <td>{product.subcategory?.name || '-'}</td>
-    <td>{product.specifications?.size || '-'}</td>
-    <td>{product.specifications?.color || '-'}</td>
-    <td>{product.type || '-'}</td>
-    <td>{formatDate(product.createdAt)}</td>
-    <td>{calculateAge(product.createdAt)}</td>
-    <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
-      {isChild ? (product.inventory?.currentStock || 0) + (product.totalSold || 0) : getTotalQuantity(product)}
-    </td>
-    <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
-      {isChild ? product.inventory?.currentStock || 0 : getTotalAvailable(product)}
-    </td>
-    <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
-      {isChild ? product.totalSold || 0 : getTotalSold(product)}
-    </td>
-    <td>₹{product.pricing?.factoryPrice || '-'}</td>
-    <td>₹{product.pricing?.offerPrice || '-'}</td>
-    <td>₹{product.pricing?.discountedPrice || '-'}</td>
-    <td>{product.pricing?.mrp ? `₹${product.pricing.mrp}` : '-'}</td>
-    <td>{product.isActive !== undefined ? (product.isActive ? 'Available' : 'Inactive') : '-'}</td>
-    <td>
-      <svg 
-        ref={(el) => {
-          if (el) {
-            setTimeout(() => renderBarcode(el, product.code), 0);
-          }
-        }}
-        className="barcode-label"
-      />
-    </td>
-    <td>
-      <button 
-        onClick={e => { e.stopPropagation(); editProduct(product._id); }}
-        className="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
-        title="Edit Product"
+      <tr
+        key={product._id}
+        className={isChild ? 'child-row' : (hasChildren ? 'parent-row' : '')}
+        onClick={handleRowClick}
       >
-        <Edit className="h-4 w-4" />
-      </button>
-    </td>
-    <td>
-      <button onClick={e => { e.stopPropagation(); printSingleProduct(product); }}>
-        🖨️
-      </button>
-    </td>
-    <td>
-      <button onClick={e => { e.stopPropagation(); deleteProduct(product._id); }}>
-        ❌
-      </button>
-    </td>
-  </tr>
-);
+        <td>{isChild ? '' : globalIndex}</td>
+        <td>
+          <input
+            type="checkbox"
+            checked={selectedProducts.has(product._id)}
+            onChange={() => toggleSelection(product._id)}
+            onClick={e => e.stopPropagation()}
+          />
+        </td>
+        <td>
+          {hasChildren && (
+            <span className="toggle-icon">
+              {expandedBundles.has(product._id) ? '➖' : '➕'}
+            </span>
+          )}
+        </td>
+        <td>{product.name}</td>
+        <td>{product.code}</td>
+        <td>{product.hsnCode || '-'}</td>
+        <td>{product.category?.name || '-'}</td>
+        <td>{product.subcategory?.name || '-'}</td>
+        <td>{product.specifications?.size || '-'}</td>
+        <td>{product.specifications?.color || '-'}</td>
+        <td>{product.type || '-'}</td>
+        <td>{formatDate(product.createdAt)}</td>
+        <td>{calculateAge(product.createdAt)}</td>
+        <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
+          {isChild ? (product.inventory?.currentStock || 0) + (product.totalSold || 0) : getTotalQuantity(product)}
+        </td>
+        <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
+          {isChild ? product.inventory?.currentStock || 0 : getTotalAvailable(product)}
+        </td>
+        <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
+          {isChild ? product.totalSold || 0 : getTotalSold(product)}
+        </td>
+        <td>₹{product.pricing?.factoryPrice || '-'}</td>
+        <td>₹{product.pricing?.offerPrice || '-'}</td>
+        <td>₹{product.pricing?.discountedPrice || '-'}</td>
+        <td>{product.pricing?.mrp ? `₹${product.pricing.mrp}` : '-'}</td>
+        <td>{product.isActive !== undefined ? (product.isActive ? 'Available' : 'Inactive') : '-'}</td>
+        <td>
+          <svg
+            ref={(el) => {
+              if (el) {
+                setTimeout(() => renderBarcode(el, product.code), 0);
+              }
+            }}
+            className="barcode-label"
+          />
+        </td>
+        <td>
+          <button
+            onClick={e => { e.stopPropagation(); editProduct(product._id); }}
+            className="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors"
+            title="Edit Product"
+          >
+            <Edit className="h-4 w-4" />
+          </button>
+        </td>
+        <td>
+          <button onClick={e => { e.stopPropagation(); printSingleProduct(product); }}>
+            🖨️
+          </button>
+        </td>
+        <td>
+          <button onClick={e => { e.stopPropagation(); deleteProduct(product._id); }}>
+            ❌
+          </button>
+        </td>
+      </tr>
+    );
   };
 
   if (loading) {
@@ -982,46 +981,47 @@ const printSingleProduct = (product) => {
         }}>
           <table style={{ minWidth: '1500px' }}>
             <thead>
-                <tr>
-                  <th>SL No.</th>
-                  <th>Select</th>
-                  <th>▼</th>
-                  <th>Name</th>
-                  <th>Product Code</th>
-                  <th>Category</th>
-                  <th>Subcategory</th>
-                  <th>Size</th>
-                  <th>Color</th>
-                  <th>Type</th>
-                  <th>Date</th>
-                  <th>Age</th>
-                  <th>Qty</th>
-                  <th>Available</th>
-                  <th>Sold</th>
-                  <th>Factory</th>
-                  <th>Offer</th>
-                  <th>Discounted</th>
-                  <th>MRP</th>
-                  <th>Status</th>
-                  <th>Barcode</th>
-                  <th>Edit</th>
-                  <th>Print</th>
-                  <th>Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentProducts.map((product, index) => (
-                  <React.Fragment key={product._id}>
-                    <ProductRow product={product} index={index} />
-                    {expandedBundles.has(product._id) && product.children?.map((child) => (
-                      <ProductRow key={child._id} product={child} index={index} isChild={true} />
-                    ))}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+              <tr>
+                <th>SL No.</th>
+                <th>Select</th>
+                <th>▼</th>
+                <th>Name</th>
+                <th>Product Code</th>
+                <th>HSN Code</th>
+                <th>Category</th>
+                <th>Subcategory</th>
+                <th>Size</th>
+                <th>Color</th>
+                <th>Type</th>
+                <th>Date</th>
+                <th>Age</th>
+                <th>Qty</th>
+                <th>Available</th>
+                <th>Sold</th>
+                <th>Factory</th>
+                <th>Offer</th>
+                <th>Discounted</th>
+                <th>MRP</th>
+                <th>Status</th>
+                <th>Barcode</th>
+                <th>Edit</th>
+                <th>Print</th>
+                <th>Delete</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentProducts.map((product, index) => (
+                <React.Fragment key={product._id}>
+                  <ProductRow product={product} index={index} />
+                  {expandedBundles.has(product._id) && product.children?.map((child) => (
+                    <ProductRow key={child._id} product={child} index={index} isChild={true} />
+                  ))}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
 
-            <div className="pagination-controls">
+          <div className="pagination-controls">
             <div className="page-numbers" style={{
               display: 'flex',
               flexWrap: 'wrap',
@@ -1059,7 +1059,7 @@ const printSingleProduct = (product) => {
               >
                 ‹ Prev
               </button>
-              
+
               {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                 const pageNum = currentPage <= 3 ? i + 1 : currentPage - 2 + i;
                 if (pageNum > totalPages) return null;
@@ -1082,7 +1082,7 @@ const printSingleProduct = (product) => {
                   </button>
                 );
               })}
-              
+
               <button
                 onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
