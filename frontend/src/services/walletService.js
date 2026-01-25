@@ -71,7 +71,7 @@ const getPointConfig = async () => {
   try {
     console.log('🔧 Fetching point config...');
     const response = await axios.get(
-      'http://localhost:5000/api/point-rules/config/price',
+      'https://api.techentia.in/api/point-rules/config/price',
       getAuthHeader()
     );
     console.log('✅ Point config fetched:', response.data.data);

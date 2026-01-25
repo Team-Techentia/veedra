@@ -25,7 +25,7 @@ const WalletSettings = () => {
         try {
             setLoading(true);
             const token = localStorage.getItem('token');
-            const response = await axios.get('http://localhost:5000/api/point-rules', {
+            const response = await axios.get('https://api.techentia.in/api/point-rules', {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setRules(response.data.data);
@@ -49,7 +49,7 @@ const WalletSettings = () => {
             const token = localStorage.getItem('token');
 
             await axios.put(
-                `http://localhost:5000/api/point-rules/${rule._id}`,
+                `https://api.techentia.in/api/point-rules/${rule._id}`,
                 {
                     minAmount: rule.minAmount,
                     maxAmount: rule.maxAmount,
@@ -73,7 +73,7 @@ const WalletSettings = () => {
     const fetchPointConfig = async () => {
         try {
             const token = localStorage.getItem('token');
-            const response = await axios.get('http://localhost:5000/api/point-rules/config/price', {
+            const response = await axios.get('https://api.techentia.in/api/point-rules/config/price', {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setPointConfig(response.data.data);
@@ -91,7 +91,7 @@ const WalletSettings = () => {
             setSavingConfig(true);
             const token = localStorage.getItem('token');
             await axios.put(
-                'http://localhost:5000/api/point-rules/config/price',
+                'https://api.techentia.in/api/point-rules/config/price',
                 { pointPrice: pointConfig.pointPrice },
                 { headers: { Authorization: `Bearer ${token}` } }
             );
