@@ -113,14 +113,14 @@ const LoginPage = () => {
             </button>
           </div>
 
-          <div className="mt-6 text-center">
+          {/* <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
               Demo credentials:<br />
               Owner: owner@erp.com / password123<br />
               Manager: manager@erp.com / password123<br />
               Staff: staff@erp.com / password123
             </p>
-          </div>
+          </div> */}
         </form>
       </div>
     </div>
