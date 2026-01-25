@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:5000/api/wallets';
+const API_URL = 'http://api.techentia.in/api/wallets';
 
 // Get auth token from localStorage
 const getAuthHeader = () => {
