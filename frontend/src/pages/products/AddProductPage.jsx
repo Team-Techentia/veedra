@@ -24,7 +24,8 @@ const AddProductPage = () => {
     discountedPrice: '',
     mrp: '',
 
-    hsnCode: '', // Added HSN Code
+    hsnCode: '6204', // Added HSN Code
+    offerType: '', // Added Offer Type
     quantity: '',
 
     currentStock: '',
@@ -414,6 +415,7 @@ const AddProductPage = () => {
         code: generatedCode,
         barcode: generatedBarcode,
         hsnCode: formData.hsnCode ? formData.hsnCode.trim() : undefined, // Include HSN Code (skip if empty)
+        offerType: formData.offerType,
         category: formData.category,
         ...(formData.subcategory && formData.subcategory.trim() && { subcategory: formData.subcategory }),
         vendor: selectedVendor._id,
@@ -517,6 +519,21 @@ const AddProductPage = () => {
                     value={formData.hsnCode}
                     onChange={handleInputChange}
                     placeholder="e.g., 6203"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Offer Type Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Offer Type
+                  </label>
+                  <input
+                    type="text"
+                    name="offerType"
+                    value={formData.offerType}
+                    onChange={handleInputChange}
+                    placeholder="e.g., Buy 1 Get 1"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>

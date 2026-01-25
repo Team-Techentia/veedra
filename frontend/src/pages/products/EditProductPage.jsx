@@ -38,6 +38,7 @@ const EditProductPage = () => {
     isActive: true,
     barcode: '',
     hsnCode: '',
+    offerType: '',
 
     specifications: {
       weight: '',
@@ -205,7 +206,8 @@ const EditProductPage = () => {
         isComboEligible: productData.isComboEligible !== undefined ? productData.isComboEligible : true,
         isActive: productData.isActive !== undefined ? productData.isActive : true,
         barcode: productData.barcode || '',
-        hsnCode: productData.hsnCode || '',
+        hsnCode: productData.hsnCode || '6204',
+        offerType: productData.offerType || '',
 
         specifications: {
           weight: productData.specifications?.weight || '',
@@ -260,6 +262,7 @@ const EditProductPage = () => {
         isComboEligible: formData.isComboEligible,
         barcode: formData.barcode,
         hsnCode: formData.hsnCode ? formData.hsnCode.trim() : undefined,
+        offerType: formData.offerType,
         isActive: formData.isActive,
 
         specifications: formData.specifications
@@ -350,6 +353,20 @@ const EditProductPage = () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Offer Type
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.offerType}
+                    onChange={(e) => setFormData(prev => ({ ...prev, offerType: e.target.value }))}
+                    placeholder="e.g., Buy 1 Get 1"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>

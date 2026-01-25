@@ -346,15 +346,15 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span>${fmt(totalMRP - actualDiscount)}</span>
               </div>
               
-              ${(bill.loyalty && bill.loyalty.redeemedPoints > 0) ? `
+              ${(bill.loyalty) ? `
               <div class="divider"></div>
               <div style="font-size: 11px;">
                 <div class="flex-between">
-                  <span>Total Points:</span>
-                  <span class="bold">${bill.loyalty.redeemedPoints}</span>
+                  <span>Used Points:</span>
+                  <span class="bold">${bill.loyalty.redeemedPoints || 0}</span>
                 </div>
                 <div class="flex-between">
-                  <span>Point Price:</span>
+                  <span>Points Price:</span>
                   <span class="bold">${fmt(bill.loyalty.pointValue || 0)}</span>
                 </div>
               </div>
@@ -409,6 +409,17 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             <span class="bold">Payment:</span>
             <span>${(bill.paymentMethod || 'cash').toUpperCase()}</span>
           </div>
+          
+          ${(bill.loyalty) ? `
+          <div class="flex-between" style="margin-top: 2mm;">
+             <span>My available Points :</span>
+             <span class="bold">${bill.loyalty.totalPoints || 0}</span>
+          </div>
+          <div class="flex-between">
+             <span>Points From this bill :</span>
+             <span class="bold">${bill.loyalty.pointsEarned || 0}</span>
+          </div>
+          ` : ''}
         </div>
         
         <div class="divider"></div>

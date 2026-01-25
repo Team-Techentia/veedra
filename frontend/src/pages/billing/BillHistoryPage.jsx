@@ -137,13 +137,22 @@ const BillHistoryPage = () => {
           const wallet = response.data || response;
           if (wallet) {
             let redeemedPoints = 0;
+            let pointsEarned = 0; // Added variable
             let pointValue = 0;
             if (wallet.transactions && Array.isArray(wallet.transactions)) {
+              // Find redemption transaction
               const redemptionTxn = wallet.transactions.find(t =>
                 (t.type === 'redeem' || t.type === 'redeemed') &&
                 (t.description?.includes(bill.billNumber) || t.metadata?.billNumber === bill.billNumber)
               );
               if (redemptionTxn) redeemedPoints = Math.abs(redemptionTxn.points);
+
+              // Find earned transaction - NEW
+              const earnedTxn = wallet.transactions.find(t =>
+                (t.type === 'earn' || t.type === 'earned') &&
+                (t.description?.includes(bill.billNumber) || t.metadata?.billNumber === bill.billNumber)
+              );
+              if (earnedTxn) pointsEarned = Math.abs(earnedTxn.points);
             }
             let currentPointPrice = 1;
             try {
@@ -153,7 +162,7 @@ const BillHistoryPage = () => {
               // ignore
             }
             if (redeemedPoints > 0) pointValue = redeemedPoints * currentPointPrice;
-            loyaltyData = { totalPoints: wallet.points, redeemedPoints, pointValue };
+            loyaltyData = { totalPoints: wallet.points, redeemedPoints, pointValue, pointsEarned }; // Added pointsEarned
           }
         } catch (err) { console.warn('Failed to fetch wallet', err); }
       }

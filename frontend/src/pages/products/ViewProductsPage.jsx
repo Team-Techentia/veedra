@@ -330,35 +330,37 @@ const ViewProductsPage = () => {
   }
 
   .sticker {
-    width: 75mm;
-    height: 50mm;
-    padding: 3mm;
+    width: 80mm;
+    height: 60mm;
+    padding: 1.5mm;
     border: 1px solid #000;
     background: white;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     page-break-after: always;
     page-break-inside: avoid;
     box-sizing: border-box;
     position: relative;
+    overflow: hidden;
   }
 
   .brand-name {
     justify-content: center;
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    font-size: 15px;
     font-weight: bold;
-    margin-bottom: 1mm;
-    padding-bottom: 0.5mm;
+    margin-bottom: 0.5mm;
+    padding-bottom: 0;
+    text-align: center;
   }
   
   .product-info {
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
-    line-height: 1.2;
+    font-size: 5px;
+    line-height: 1.1;
   }
   
   .info-line {
-    margin-bottom: 0.5mm;
+    margin-bottom: 0.2mm;
   }
   
   .label {
@@ -367,22 +369,37 @@ const ViewProductsPage = () => {
   }
   
   .price-info {
-    margin: 1mm 0;
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    margin: 0.5mm 0;
+    font-size: 5px;
   }
   
   .barcode {
     text-align: center;
     margin-top: auto;
+    margin-bottom: 0;
   }
   
   .barcode-code {
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
-    margin-top: 0.5mm;
+    font-size: 6px;
+    margin-top: 0;
     letter-spacing: 0.5px;
     text-align: center;
   }
 
+  .row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .price-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 2px;
+  }
+
+  /* Force Update */
   @media print {
     body {
       margin: 0;
@@ -391,7 +408,7 @@ const ViewProductsPage = () => {
     
     .sticker {
       margin: 0;
-      padding: 3mm;
+      padding: 1.5mm;
       border: none;
       page-break-after: always;
       page-break-inside: avoid;
@@ -404,72 +421,53 @@ const ViewProductsPage = () => {
 </style>
 `;
       const body = list.map((p, i) => {
-        // Check if this is a combo product - check multiple possible fields
-        const isCombo = p.type === 'combo' ||
-          p.comboType ||
-          p.isCombo ||
-          (p.rules && p.rules.slots) ||
-          p.offerPrice ||
-          (p.sku && p.sku.startsWith('CMB'));
+        console.log("Generating sticker for:", p.name, "with offerType:", p.offerType);
+        const name = p.name || '';
+        const category = p.category?.name || '';
+        // Always blank as per user request
+        const color = '';
+        const size = '';
 
-        if (isCombo) {
-          // Combo sticker format
-          return `
-            <div class="sticker">
-              <div class="brand-name">VEEDRA THE BRAND</div>
-              <div class="product-info">
-                <div class="info-line">
-                  <span class="label">Name:</span>
-                  <span>${p.name || ''}</span>
-                </div>
-                <div class="info-line">
-                  <span class="label">SKU:</span>
-                  <span>${p.sku || p.code || 'CMB-0001'}</span>
-                </div>
-                <div class="info-line">
-                  <span class="label">Type:</span>
-                  <span>${p.comboType || p.type || ''}</span>
-                </div>
-                <div class="price-info">
-                  <div><strong>Price Slots:</strong> ${p.priceSlots ||
-            (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
-            '₹350–400 | ₹430–500 | ₹700–730'
-            }</div>
-                  <div><strong>Combo Offer Price:</strong> ₹${p.offerPrice || p.pricing?.offerPrice || '999'}</div>
-                </div>
-              </div>
-              <div class="barcode">
-                <svg id="barcode-${i}"></svg>
-                <div class="barcode-code">Code: ${p.code}</div>
-              </div>
-            </div>
-          `;
-        } else {
-          // Regular product sticker format
-          return `
-            <div class="sticker">
-              <div class="brand-name">VEEDRA THE BRAND</div>
-              <div class="product-info">
-                <div class="info-line">
-                  <span class="label">Name:</span>
-                  <span>${p.name || ''}</span>
-                </div>
-                <div class="info-line">
-                  <span class="label">Category:</span>
-                  <span>${p.category?.name || ''}</span>
-                </div>
-                <div class="price-info">
-                  <div><strong>MRP:</strong> ₹${p.pricing?.mrp || '_________'}</div>
-                  <div><strong>Discounted Price (15% Off):</strong> ₹${p.pricing?.discountedPrice || '_________'}</div>
-                </div>
-              </div>
-              <div class="barcode">
-                <svg id="barcode-${i}"></svg>
-                <div class="barcode-code">Code: ${p.code}</div>
-              </div>
-            </div>
-          `;
+        const mrp = p.pricing?.mrp || '';
+        const offerPrice = p.pricing?.discountedPrice || p.pricing?.offerPrice || '';
+        const offerType = p.offerType || ''; // "4 for 1000" etc.
+
+        const isCombo = p.type === 'combo' || p.comboType || p.isCombo || (p.sku && p.sku.startsWith('CMB'));
+
+        let comboText = offerType;
+        if (!comboText && isCombo) {
+          const slots = p.priceSlots || (p.rules?.slots ? p.rules.slots.map(s => `${s.quantity} for ₹${s.maxPrice}`).join(', ') : '');
+          comboText = slots || 'Combo Offer';
         }
+
+        return `
+            <div class="sticker">
+              <div class="brand-name">VEEDRA THE BRAND</div>
+              
+              <div class="name-field">Name: ${name}</div>
+              
+              <div class="row">
+                 <div><span class="label">Category:</span><span class="value">${category}</span></div>
+              </div>
+
+              <div class="row" style="margin-top: 5px; margin-bottom: 5px;">
+                 <div style="flex:1"><span class="label">Color :</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
+                 <div style="flex:1; text-align:right;"><span class="label">Size:</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
+              </div>
+
+              <div class="price-row">
+                 ${mrp ? `<div><span class="label">MRP:</span><span class="value">₹${mrp}</span></div>` : ''}
+                 ${offerPrice ? `<div><span class="label">Offer:</span><span class="value">₹${offerPrice}</span></div>` : ''}
+              </div>
+
+              ${comboText ? `<div class="combo-offer" style="text-align: center; font-weight: bold; margin-top: 5px;">Combo Offer : ${comboText}</div>` : ''}
+
+              <div class="barcode">
+                <svg id="barcode-${i}"></svg>
+                <div class="barcode-code">Code: ${p.code}</div>
+              </div>
+            </div>
+          `;
       }).join("");
 
       const scripts = `
@@ -479,7 +477,7 @@ const ViewProductsPage = () => {
            JsBarcode("#barcode-${i}", "${p.code}", {
   format: "CODE128",
   width: 1.0,  // Fixed width
-  height: ${dimensions.barcodeHeight},
+  height: ${parseInt(dimensions.barcodeHeight) - 8},
               displayValue: false,
               margin: 1
             });
@@ -499,11 +497,12 @@ const ViewProductsPage = () => {
   const printSingleProduct = (product) => {
     const generateStickerHTML = (p) => {
       const dimensions = getStickerDimensions(stickerSize);
+
+      // Determine if it is a combo based on various fields
       const isCombo = p.type === 'combo' ||
         p.comboType ||
         p.isCombo ||
         (p.rules && p.rules.slots) ||
-        p.offerPrice ||
         (p.sku && p.sku.startsWith('CMB'));
 
       const styles = `
@@ -517,34 +516,38 @@ const ViewProductsPage = () => {
     margin: 0;
     padding: 0;
     font-family: Arial, sans-serif;
+     font-size: 22px;
   }
   
   .sticker {
     width: 75mm;
     height: 50mm;
-    padding: 3mm;
+    padding: 1.5mm;
     border: 1px solid #000;
     background: white;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-start;
+    position: relative;
+    overflow: hidden;
   }
   
   .brand-name {
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    font-size: 11px;
     font-weight: bold;
-    margin-bottom: 1mm;
-    padding-bottom: 0.5mm;
+    margin-bottom: 0.5mm;
+    padding-bottom: 0;
+    text-align: center;
   }
   
   .product-info {
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
-    line-height: 1.4;
+    font-size: 10px;
+    line-height: 1.1;
   }
   
   .info-line {
-    margin-bottom: 0.5mm;
+    margin-bottom: 0.2mm;
   }
   
   .label {
@@ -553,20 +556,34 @@ const ViewProductsPage = () => {
   }
   
   .price-info {
-    margin: 1mm 0;
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
+    margin: 0.5mm 0;
+    font-size: 11px;
   }
   
   .barcode {
     text-align: center;
     margin-top: auto;
+    margin-bottom: 0;
   }
   
   .barcode-code {
     text-align: center;
-    font-size: ${parseInt(dimensions.fontSize) + 4}px;
-    margin-top: 0.5mm;
+    font-size: 9px;
+    margin-top: 0;
     letter-spacing: 0.5px;
+  }
+
+  .row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .price-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 2px;
   }
   
   @media print {
@@ -577,65 +594,42 @@ const ViewProductsPage = () => {
     
     .sticker {
       margin: 0;
-      padding: 3mm;
+      padding: 1.5mm;
       border: none;
     }
   }
 </style>
 `;
-      // ... baaki code same rahega
+      const offerType = p.offerType || '';
+      const comboText = offerType || (isCombo ? (p.priceSlots || (p.rules?.slots ? p.rules.slots.map(s => `${s.quantity} for ₹${s.maxPrice}`).join(', ') : '') || 'Combo Offer') : '');
 
-      const body = isCombo ? `
-        <div class="sticker">
-          <div class="brand-name">VEEDRA THE BRAND</div>
-          <div class="product-info">
-            <div class="info-line">
-              <span class="label">Name:</span>
-              <span>${p.name || ''}</span>
+      const body = `
+            <div class="sticker">
+              <div class="brand-name">VEEDRA THE BRAND</div>
+              
+              <div class="name-field">Name: ${p.name || ''}</div>
+              
+              <div class="row">
+                 <div><span class="label">Category:</span><span class="value">${p.category?.name || ''}</span></div>
+              </div>
+
+              <div class="row" style="margin-top: 5px; margin-bottom: 5px;">
+                 <div style="flex:1"><span class="label">Color :</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
+                 <div style="flex:1; text-align:right;"><span class="label">Size:</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
+              </div>
+
+              <div class="price-row">
+                 ${p.pricing?.mrp ? `<div><span class="label">MRP:</span><span class="value">₹${p.pricing.mrp}</span></div>` : ''}
+                 ${(p.offerPrice || p.pricing?.discountedPrice || p.pricing?.offerPrice) ? `<div><span class="label">Offer:</span><span class="value">₹${p.offerPrice || p.pricing?.discountedPrice || p.pricing?.offerPrice}</span></div>` : ''}
+              </div>
+
+              ${comboText ? `<div class="combo-offer" style="text-align: center; font-weight: bold; margin-top: 5px;">Combo Offer : ${comboText}</div>` : ''}
+
+              <div class="barcode">
+                <svg id="barcode-single"></svg>
+                <div class="barcode-code">Code: ${p.code}</div>
+              </div>
             </div>
-            <div class="info-line">
-              <span class="label">SKU:</span>
-              <span>${p.sku || p.code || 'CMB-0001'}</span>
-            </div>
-            <div class="info-line">
-              <span class="label">Type:</span>
-              <span>${p.comboType || p.type || ''}</span>
-            </div>
-            <div class="price-info">
-              <div><strong>Price Slots:</strong> ${p.priceSlots ||
-        (p.rules && p.rules.slots ? p.rules.slots.map(s => `₹${s.minPrice}–${s.maxPrice}`).join(' | ') : '') ||
-        '₹350–400 | ₹430–500 | ₹700–730'
-        }</div>
-              <div><strong>Combo Offer Price:</strong> ₹${p.offerPrice || p.pricing?.offerPrice || '999'}</div>
-            </div>
-          </div>
-          <div class="barcode">
-            <svg id="barcode-single"></svg>
-            <div class="barcode-code">Code: ${p.code}</div>
-          </div>
-        </div>
-      ` : `
-        <div class="sticker">
-          <div class="brand-name">VEEDRA THE BRAND</div>
-          <div class="product-info">
-            <div class="info-line">
-              <span class="label">Name:</span>
-              <span>${p.name || ''}</span>
-            </div>
-            <div class="info-line">
-              <span class="label">Category:</span>
-              <span>${p.category?.name || ''}</span>
-            </div>
-            <div class="price-info">
-              <div><strong>MRP:</strong> ₹${p.pricing?.mrp || '_________'}</div>
-              <div><strong>Offer Price:</strong> ₹${p.pricing?.discountedPrice || '_________'}</div>
-            </div>
-          </div>
-          <div class="barcode">
-            <svg id="barcode-single"></svg>
-            <div class="barcode-code">Code: ${p.code}</div>
-          </div>
-        </div>
       `;
 
       const scripts = `
@@ -644,7 +638,7 @@ const ViewProductsPage = () => {
           JsBarcode("#barcode-single", "${p.code}", {
   format: "CODE128",
   width: 1.0,  // Fixed width instead of conditional
-  height: ${dimensions.barcodeHeight},
+  height: ${parseInt(dimensions.barcodeHeight) - 8},
             displayValue: false,
             margin: 1
           });
@@ -755,6 +749,7 @@ const ViewProductsPage = () => {
         <td>{product.specifications?.size || '-'}</td>
         <td>{product.specifications?.color || '-'}</td>
         <td>{product.type || '-'}</td>
+        <td>{product.offerType || '-'}</td>
         <td>{formatDate(product.createdAt)}</td>
         <td>{calculateAge(product.createdAt)}</td>
         <td style={{ fontWeight: !isChild && hasChildren ? 'bold' : 'normal', color: !isChild && hasChildren ? '#0066cc' : 'inherit' }}>
@@ -993,6 +988,7 @@ const ViewProductsPage = () => {
                 <th>Size</th>
                 <th>Color</th>
                 <th>Type</th>
+                <th>Offer Type</th>
                 <th>Date</th>
                 <th>Age</th>
                 <th>Qty</th>
