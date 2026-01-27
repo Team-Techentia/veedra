@@ -49,7 +49,11 @@ const productSchema = new mongoose.Schema({
     default: 'standalone',
     required: true
   },
-  
+  offerType: {
+    type: String,
+    trim: true
+  },
+
   // Bundle Configuration (for parent products)
   bundle: {
     isBundle: {
@@ -60,7 +64,7 @@ const productSchema = new mongoose.Schema({
       type: String,
       enum: ['same_size_different_colors', 'different_sizes_same_color', 'different_sizes_different_colors', 'custom'],
       default: 'custom',
-      required: function() { return this.isBundle; }
+      required: function () { return this.isBundle; }
     },
     bundleSize: {
       type: Number,
@@ -115,14 +119,14 @@ const productSchema = new mongoose.Schema({
       }
     }
   },
-  
+
   // Parent-Child Relationship
   parentProduct: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product',
     default: null
   },
-  
+
   // Child Product Configuration
   childConfig: {
     serialNumber: {
@@ -277,39 +281,39 @@ productSchema.index({ isActive: 1 });
 productSchema.index({ isComboEligible: 1 });
 
 // Generate product code with enhanced logic matching screenshot format
-productSchema.pre('save', async function(next) {
+productSchema.pre('save', async function (next) {
   if (this.isNew && !this.code) {
     // For child products, use parent's code with sequential suffix
     if (this.type === 'child' && this.parentProduct) {
       const parent = await this.constructor.findById(this.parentProduct);
       if (!parent) throw new Error('Parent product not found');
-      
+
       // Get next available child number
       const siblings = await this.constructor.find({ parentProduct: this.parentProduct });
       const nextChildNum = (siblings.length + 1).toString().padStart(2, '0');
-      
+
       this.code = `${parent.code}/${nextChildNum}`;
       return next();
     }
-    
+
     const category = await mongoose.model('Category').findById(this.category);
-    
+
     // Build code components based on screenshot format
     const catPrefix = category ? category.code.substring(0, 3).toUpperCase() : 'GEN';
-    
+
     // Find latest product in this category
     const filterQuery = {
       category: this.category,
       type: { $ne: 'child' } // Exclude child products
     };
-    
+
     const existingProducts = await this.constructor
       .find(filterQuery)
       .sort({ code: -1 })
       .limit(1);
-    
+
     let nextNumber = 1;
-    
+
     if (existingProducts.length > 0) {
       const lastCode = existingProducts[0].code;
       const match = lastCode.match(/A(\d+)$/);
@@ -317,7 +321,7 @@ productSchema.pre('save', async function(next) {
         nextNumber = parseInt(match[1]) + 1;
       }
     }
-    
+
     // Format: SHI/WTS/A00002
     this.code = `${catPrefix}/WTS/A${nextNumber.toString().padStart(5, '0')}`;
   }
@@ -325,12 +329,12 @@ productSchema.pre('save', async function(next) {
 });
 
 // Enhanced barcode generation supporting multiple formats
-productSchema.pre('save', function(next) {
+productSchema.pre('save', function (next) {
   if (this.isNew && !this.barcode) {
     // Generate barcode based on product code (matching screenshot style)
     const productCodeDigits = this.code.replace(/[^0-9]/g, ''); // Extract only numbers
     const timestamp = Date.now().toString().slice(-4);
-    
+
     if (this.bundle?.generateBarcodes !== false) {
       // For bundle products, generate systematic barcodes
       if (this.type === 'parent') {
@@ -363,7 +367,7 @@ productSchema.pre('save', function(next) {
 });
 
 // Generate SKU
-productSchema.pre('save', function(next) {
+productSchema.pre('save', function (next) {
   if (this.isNew && !this.sku) {
     const namePrefix = this.name.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '');
     const timestamp = Date.now().toString().slice(-4);
@@ -373,7 +377,7 @@ productSchema.pre('save', function(next) {
 });
 
 // Calculate check digit for barcode
-productSchema.methods.calculateCheckDigit = function(code) {
+productSchema.methods.calculateCheckDigit = function (code) {
   let sum = 0;
   for (let i = 0; i < code.length; i++) {
     const digit = parseInt(code[i]);
@@ -383,13 +387,13 @@ productSchema.methods.calculateCheckDigit = function(code) {
 };
 
 // Virtual for profit margin
-productSchema.virtual('profitMargin').get(function() {
+productSchema.virtual('profitMargin').get(function () {
   if (this.pricing.factoryPrice === 0) return 0;
   return ((this.pricing.offerPrice - this.pricing.factoryPrice) / this.pricing.factoryPrice * 100).toFixed(2);
 });
 
 // Virtual for stock status
-productSchema.virtual('stockStatus').get(function() {
+productSchema.virtual('stockStatus').get(function () {
   if (this.inventory.currentStock === 0) return 'out_of_stock';
   if (this.inventory.currentStock <= this.inventory.reorderPoint) return 'low_stock';
   if (this.inventory.currentStock <= this.inventory.minStockLevel) return 'min_stock';
@@ -405,7 +409,7 @@ productSchema.virtual('childProducts', {
 });
 
 // Virtual for bundle status
-productSchema.virtual('bundleStatus').get(function() {
+productSchema.virtual('bundleStatus').get(function () {
   if (this.type === 'parent' && this.bundle.isBundle) {
     return {
       isComplete: this.bundle.childrenCount === this.bundle.bundleSize - 1,
@@ -417,7 +421,7 @@ productSchema.virtual('bundleStatus').get(function() {
 });
 
 // Virtual for full product hierarchy
-productSchema.virtual('productHierarchy').get(function() {
+productSchema.virtual('productHierarchy').get(function () {
   if (this.type === 'parent') {
     return `${this.name} (Bundle of ${this.bundle.bundleSize})`;
   } else if (this.type === 'child' && this.parentProduct) {
@@ -430,27 +434,27 @@ productSchema.virtual('productHierarchy').get(function() {
 productSchema.set('toJSON', { virtuals: true });
 
 // Method to create child products for bundle
-productSchema.methods.createChildProducts = async function(userId) {
+productSchema.methods.createChildProducts = async function (userId) {
   if (this.type !== 'parent' || !this.bundle.isBundle) {
     throw new Error('Only parent bundle products can create children');
   }
-  
+
   // Critical check: ensure parent has an ID
   if (!this._id) {
     throw new Error('Parent product must be saved before creating children - no _id found');
   }
-  
+
   const childProducts = [];
   const config = this.bundle.bundleConfig || {};
-  
+
   // Generate variants based on bundle type
   const variants = [];
   let parentQuantity = 0;
-  
+
   // For mixed size mixed color bundles, we create multiple child products with quantity 1 each
   // For other bundle types, we require custom quantities
-  if (this.bundle.bundleType !== 'different_sizes_different_colors' && 
-      (!config.mixedConfig || config.mixedConfig.length === 0)) {
+  if (this.bundle.bundleType !== 'different_sizes_different_colors' &&
+    (!config.mixedConfig || config.mixedConfig.length === 0)) {
     throw new Error('Bundle creation requires custom quantities in mixedConfig for this bundle type.');
   }
 
@@ -459,13 +463,13 @@ productSchema.methods.createChildProducts = async function(userId) {
     // For mixed size mixed color, use 1+(n-1) structure:
     // Parent gets 1 quantity, rest are child products
     const totalStock = this.inventory.currentStock || 0;
-    
+
     if (totalStock < 2) {
       throw new Error('Mixed bundle must have at least 2 items (1 parent + 1 child product)');
     }
-    
+
     parentQuantity = 1; // Parent keeps 1
-    
+
     // Create (n-1) child variants for mixed bundles, each with quantity 1
     const numChildren = totalStock - 1;
     for (let i = 0; i < numChildren; i++) {
@@ -482,16 +486,16 @@ productSchema.methods.createChildProducts = async function(userId) {
   } else {
     // Process each item in mixedConfig
     const mixedItems = config.mixedConfig;
-    
+
     switch (this.bundle.bundleType) {
       case 'same_size_different_colors':
         const baseColor = config.baseColor || (config.colors && config.colors[0]) || 'Red';
         const baseSize = config.baseSize || (config.sizes && config.sizes[0]) || 'M';
-        
+
         // Find parent quantity (base color)
         const parentColorItem = mixedItems.find(item => item.color === baseColor);
         parentQuantity = parentColorItem ? parentColorItem.quantity : 0;
-        
+
         // Create variants for non-base colors
         mixedItems.forEach(item => {
           if (item.color !== baseColor && item.quantity > 0) {
@@ -504,15 +508,15 @@ productSchema.methods.createChildProducts = async function(userId) {
           }
         });
         break;
-        
+
       case 'different_sizes_same_color':
         const baseSize2 = config.baseSize || (config.sizes && config.sizes[0]) || 'M';
         const baseColor2 = config.baseColor || (config.colors && config.colors[0]) || 'Black';
-        
+
         // Find parent quantity (base size)
         const parentSizeItem = mixedItems.find(item => item.size === baseSize2);
         parentQuantity = parentSizeItem ? parentSizeItem.quantity : 0;
-        
+
         // Create variants for non-base sizes
         mixedItems.forEach(item => {
           if (item.size !== baseSize2 && item.quantity > 0) {
@@ -525,7 +529,7 @@ productSchema.methods.createChildProducts = async function(userId) {
           }
         });
         break;
-        
+
       case 'different_sizes_different_colors':
         // For this type with mixedConfig, all items become children, parent gets 0
         parentQuantity = 0;
@@ -540,19 +544,19 @@ productSchema.methods.createChildProducts = async function(userId) {
           }
         });
         break;
-        
+
       default:
         throw new Error(`Unsupported bundle type: ${this.bundle.bundleType}`);
     }
   }
-  
+
   // Update bundle size to match actual number of variants if not specified
   if (!this.bundle.bundleSize || this.bundle.bundleSize < variants.length + 1) {
     this.bundle.bundleSize = variants.length + 1; // +1 for parent
   }
-  
+
   // Remove duplicate variants declaration
-  
+
   // Create child products
   for (let i = 0; i < variants.length; i++) {
     const variant = variants[i];
@@ -580,7 +584,7 @@ productSchema.methods.createChildProducts = async function(userId) {
       vendor: this.vendor,
       createdBy: userId
     };
-    
+
     // Inherit pricing
     const priceAdjustment = config.priceVariation || 0;
     childData.pricing = {
@@ -589,10 +593,10 @@ productSchema.methods.createChildProducts = async function(userId) {
       discountedPrice: this.pricing.discountedPrice + priceAdjustment,
       mrp: this.pricing.mrp + priceAdjustment
     };
-    
+
     // Set specifications with variant details
     const parentSpecs = this.specifications || {};
-    childData.specifications = { 
+    childData.specifications = {
       weight: parentSpecs.weight,
       color: variant.color,
       size: variant.size,
@@ -601,52 +605,52 @@ productSchema.methods.createChildProducts = async function(userId) {
       model: parentSpecs.model,
       warrantyPeriod: parentSpecs.warrantyPeriod
     };
-    
+
     // Add dimensions only if it exists
     if (parentSpecs.dimensions && Object.keys(parentSpecs.dimensions).length > 0) {
       childData.specifications.dimensions = parentSpecs.dimensions;
     }
-    
+
     // Remove undefined fields
     Object.keys(childData.specifications).forEach(key => {
       if (childData.specifications[key] === undefined) {
         delete childData.specifications[key];
       }
     });
-    
+
     // Inherit GST details
     childData.hsnCode = this.hsnCode;
     childData.gstRate = this.gstRate;
-    
-      // Set inventory with quantity 1 for mixed bundles
-      childData.inventory = {
-        currentStock: this.bundle.bundleType === 'different_sizes_different_colors' ? 1 : variant.customQuantity,
-        minStockLevel: this.inventory.minStockLevel,
-        maxStockLevel: this.inventory.maxStockLevel,
-        reorderPoint: this.inventory.reorderPoint,
-        location: this.inventory.location
-      };    // Copy other properties
+
+    // Set inventory with quantity 1 for mixed bundles
+    childData.inventory = {
+      currentStock: this.bundle.bundleType === 'different_sizes_different_colors' ? 1 : variant.customQuantity,
+      minStockLevel: this.inventory.minStockLevel,
+      maxStockLevel: this.inventory.maxStockLevel,
+      reorderPoint: this.inventory.reorderPoint,
+      location: this.inventory.location
+    };    // Copy other properties
     childData.description = `${this.description} - ${variant.size} ${variant.color}`;
     childData.tags = [...(this.tags || [])];
     childData.isActive = this.isActive;
     childData.isComboEligible = this.isComboEligible;
-    
+
     const childProduct = new this.constructor(childData);
     await childProduct.save();
     childProducts.push(childProduct);
   }
-  
+
   // Update parent product
   this.bundle.childrenCount = childProducts.length;
   this.inventory.currentStock = parentQuantity;
-  
+
   // Set parent's specifications to include variant details
   if (config.sizes && config.sizes.length > 0 && config.colors && config.colors.length > 0) {
     const currentSpecs = this.specifications || {};
-    
+
     // Determine parent variant based on bundle type
     let parentSize, parentColor;
-    
+
     if (this.bundle.bundleType === 'same_size_different_colors') {
       parentSize = config.baseSize || config.sizes[0];
       parentColor = config.baseColor || config.colors[0];
@@ -657,7 +661,7 @@ productSchema.methods.createChildProducts = async function(userId) {
       parentSize = config.sizes[0] || 'Standard';
       parentColor = config.colors[0] || 'Default';
     }
-    
+
     this.specifications = {
       weight: currentSpecs.weight,
       material: currentSpecs.material,
@@ -667,60 +671,60 @@ productSchema.methods.createChildProducts = async function(userId) {
       size: parentSize,
       color: parentColor
     };
-    
+
     // Add dimensions only if it exists and is not empty
     if (currentSpecs.dimensions && Object.keys(currentSpecs.dimensions).length > 0) {
       this.specifications.dimensions = currentSpecs.dimensions;
     }
   }
-  
+
   await this.save();
-  
+
   return childProducts;
 };
 
 // Method to update child products when parent changes
-productSchema.methods.updateChildProducts = async function(updateFields = {}) {
+productSchema.methods.updateChildProducts = async function (updateFields = {}) {
   if (this.type !== 'parent' || !this.bundle.isBundle) {
     throw new Error('Only parent bundle products can update children');
   }
-  
+
   const childProducts = await this.constructor.find({ parentProduct: this._id });
-  
+
   for (const child of childProducts) {
     let hasChanges = false;
-    
+
     // Update pricing if inherited
     if (child.childConfig?.inheritFromParent?.pricing && updateFields.pricing) {
       child.pricing = { ...child.pricing, ...updateFields.pricing };
       hasChanges = true;
     }
-    
+
     // Update specifications if inherited
     if (child.childConfig?.inheritFromParent?.specifications && updateFields.specifications) {
       child.specifications = { ...child.specifications, ...updateFields.specifications };
       hasChanges = true;
     }
-    
+
     // Update GST if inherited
     if (child.childConfig?.inheritFromParent?.gst && (updateFields.hsnCode || updateFields.gstRate)) {
       if (updateFields.hsnCode) child.hsnCode = updateFields.hsnCode;
       if (updateFields.gstRate) child.gstRate = updateFields.gstRate;
       hasChanges = true;
     }
-    
+
     // Update category if inherited
     if (child.childConfig?.inheritFromParent?.category && updateFields.category) {
       child.category = updateFields.category;
       hasChanges = true;
     }
-    
+
     // Update vendor if inherited
     if (child.childConfig?.inheritFromParent?.vendor && updateFields.vendor) {
       child.vendor = updateFields.vendor;
       hasChanges = true;
     }
-    
+
     if (hasChanges) {
       await child.save();
     }
@@ -728,18 +732,18 @@ productSchema.methods.updateChildProducts = async function(updateFields = {}) {
 };
 
 // Method to get bundle summary
-productSchema.methods.getBundleSummary = async function() {
+productSchema.methods.getBundleSummary = async function () {
   if (this.type !== 'parent' || !this.bundle.isBundle) {
     return null;
   }
-  
+
   const childProducts = await this.constructor.find({ parentProduct: this._id })
     .select('name code barcode inventory.currentStock pricing.offerPrice isActive');
-  
+
   const totalStock = childProducts.reduce((sum, child) => sum + child.inventory.currentStock, 0);
-  const totalValue = childProducts.reduce((sum, child) => 
+  const totalValue = childProducts.reduce((sum, child) =>
     sum + (child.inventory.currentStock * child.pricing.offerPrice), 0);
-  
+
   return {
     parentProduct: {
       id: this._id,
@@ -768,7 +772,7 @@ productSchema.methods.getBundleSummary = async function() {
 };
 
 // Static method to get low stock products
-productSchema.statics.getLowStockProducts = function() {
+productSchema.statics.getLowStockProducts = function () {
   return this.find({
     isActive: true,
     $expr: { $lte: ['$inventory.currentStock', '$inventory.minStockLevel'] }
@@ -776,23 +780,23 @@ productSchema.statics.getLowStockProducts = function() {
 };
 
 // Static method to create bundle with children
-productSchema.statics.createBundleWithChildren = async function(bundleData, userId) {
+productSchema.statics.createBundleWithChildren = async function (bundleData, userId) {
   // For bundles, ensure bundleSize matches total inventory
   if (!bundleData.inventory?.currentStock || bundleData.inventory.currentStock < 2) {
     throw new Error('Bundle must have at least 2 total items (1 parent + 1 child)');
   }
-  
+
   // Set bundle size based on total inventory if not already set
   if (!bundleData.bundle.bundleSize || bundleData.bundle.bundleSize !== bundleData.inventory.currentStock) {
     bundleData.bundle.bundleSize = bundleData.inventory.currentStock;
   }
-  
+
   // Create parent product
   const parentData = {
     ...bundleData,
     type: 'parent',
     // Update parent name for mixed bundles
-    name: bundleData.bundle.bundleType === 'different_sizes_different_colors' 
+    name: bundleData.bundle.bundleType === 'different_sizes_different_colors'
       ? `${bundleData.name} - Mixed Bundle`
       : bundleData.name,
     bundle: {
@@ -806,16 +810,16 @@ productSchema.statics.createBundleWithChildren = async function(bundleData, user
     },
     createdBy: userId
   };
-  
+
   try {
     const parentProduct = new this(parentData);
     await parentProduct.save();
-    
+
     // Auto-generate children if requested
     if (parentProduct.bundle.autoGenerateChildren) {
       await parentProduct.createChildProducts(userId);
     }
-    
+
     return parentProduct;
   } catch (error) {
     console.error('Error creating parent product:', error);
@@ -824,24 +828,24 @@ productSchema.statics.createBundleWithChildren = async function(bundleData, user
 };
 
 // Static method to get all bundles
-productSchema.statics.getBundles = function(options = {}) {
+productSchema.statics.getBundles = function (options = {}) {
   const query = {
     type: 'parent',
     'bundle.isBundle': true,
     isActive: true
   };
-  
+
   if (options.includeInactive) {
     delete query.isActive;
   }
-  
+
   return this.find(query)
     .populate('category vendor childProducts')
     .sort({ 'bundle.bundleSize': -1, name: 1 });
 };
 
 // Static method to get bundle analytics
-productSchema.statics.getBundleAnalytics = function() {
+productSchema.statics.getBundleAnalytics = function () {
   return this.aggregate([
     {
       $match: {
@@ -885,13 +889,13 @@ productSchema.statics.getBundleAnalytics = function() {
 };
 
 // Static method to bulk create products from CSV/Excel
-productSchema.statics.bulkCreateProducts = async function(productsData, userId, options = {}) {
+productSchema.statics.bulkCreateProducts = async function (productsData, userId, options = {}) {
   const results = {
     success: [],
     errors: [],
     bundles: []
   };
-  
+
   for (const productData of productsData) {
     try {
       // Check if this should be a bundle
@@ -918,7 +922,7 @@ productSchema.statics.bulkCreateProducts = async function(productsData, userId, 
       });
     }
   }
-  
+
   return results;
 };
 

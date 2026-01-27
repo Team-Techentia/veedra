@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://api.techentia.in/api/wallets';
+const API_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/wallets`;
 
 // Get auth token from localStorage
 const getAuthHeader = () => {
@@ -39,6 +39,23 @@ const calculatePointsEarned = async (billAmount) => {
     return response.data;
   } catch (error) {
     console.error('Error calculating points:', error);
+    throw error.response?.data || error;
+  }
+};
+
+// Calculate points per product
+const calculatePointsPerProduct = async (products) => {
+  try {
+    console.log('📊 Calculating points per product...', products);
+    const response = await axios.post(
+      `${API_URL}/calculate-points-per-product`,
+      { products },
+      getAuthHeader()
+    );
+    console.log('✅ Points per product:', response.data.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ Error calculating points per product:', error);
     throw error.response?.data || error;
   }
 };
@@ -85,6 +102,7 @@ const getPointConfig = async () => {
 const walletService = {
   getWalletByPhone,
   calculatePointsEarned,
+  calculatePointsPerProduct,
   updateWalletPoints,
   getPointConfig
 };

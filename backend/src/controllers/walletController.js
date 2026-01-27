@@ -1,4 +1,5 @@
 const Wallet = require('../models/Wallet');
+const Billing = require('../models/Billing');
 const PointRule = require('../models/PointRule');
 const asyncHandler = require('express-async-handler');
 
@@ -19,15 +20,39 @@ const getWalletByPhone = asyncHandler(async (req, res) => {
 
   let wallet = await Wallet.findOne({ phone });
 
+  // Lookup name from Billing history if wallet missing or has default name
+  let historicalName = '';
+  if (!wallet || wallet.customerName === 'Customer') {
+    try {
+      const lastBill = await Billing.findOne({ 'customer.phone': phone })
+        .sort({ createdAt: -1 })
+        .select('customer.name');
+
+      if (lastBill && lastBill.customer && lastBill.customer.name) {
+        historicalName = lastBill.customer.name;
+        console.log(`👤 [getWalletByPhone] Found name in history: ${historicalName}`);
+      }
+    } catch (err) {
+      console.warn('⚠️ [getWalletByPhone] Error looking up billing history:', err.message);
+    }
+  }
+
   // Create wallet if doesn't exist
   if (!wallet) {
     wallet = await Wallet.create({
       phone,
       points: 0,
+      customerName: historicalName || 'Customer',
       transactions: []
     });
-    console.log(`📱 [getWalletByPhone] New wallet created for phone: ${phone}`);
+    console.log(`📱 [getWalletByPhone] New wallet created for phone: ${phone} (Name: ${wallet.customerName})`);
   } else {
+    // Optional: Update name if we found a better one from history
+    if (historicalName && wallet.customerName === 'Customer') {
+      wallet.customerName = historicalName;
+      await wallet.save();
+      console.log(`🔄 [getWalletByPhone] Updated wallet name from history: ${historicalName}`);
+    }
     console.log(`📱 [getWalletByPhone] Existing wallet found - Phone: ${phone}, Points: ${wallet.points}`);
   }
 
@@ -69,9 +94,56 @@ const calculatePointsEarned = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Update wallet points (add or deduct)
-// @route   POST /api/wallets/update
+// @desc    Calculate points earned per product
+// @route   POST /api/wallets/calculate-points-per-product
 // @access  Private
+const calculatePointsPerProduct = asyncHandler(async (req, res) => {
+  const { products } = req.body;
+
+  if (!products || !Array.isArray(products) || products.length === 0) {
+    res.status(400);
+    throw new Error('Valid products array is required');
+  }
+
+  // Fetch point rules
+  const rules = await PointRule.find().sort({ minAmount: 1 });
+
+  // Calculate points for each product
+  const productsWithPoints = products.map(product => {
+    const { productId, productName, price, quantity } = product;
+    const totalPrice = price * quantity;
+
+    // Find applicable rule for this product's total price
+    let points = 0;
+    for (const rule of rules) {
+      if (totalPrice >= rule.minAmount && totalPrice <= rule.maxAmount) {
+        points = rule.points;
+        break;
+      }
+    }
+
+    return {
+      productId,
+      productName,
+      price,
+      quantity,
+      totalPrice,
+      points
+    };
+  });
+
+  // Calculate total points
+  const totalPoints = productsWithPoints.reduce((sum, p) => sum + p.points, 0);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      products: productsWithPoints,
+      totalPoints
+    }
+  });
+});
+
 // @desc    Update wallet points (add or deduct)
 // @route   POST /api/wallets/update
 // @access  Private
@@ -146,5 +218,6 @@ const updateWalletPoints = asyncHandler(async (req, res) => {
 module.exports = {
   getWalletByPhone,
   calculatePointsEarned,
+  calculatePointsPerProduct,
   updateWalletPoints
 };

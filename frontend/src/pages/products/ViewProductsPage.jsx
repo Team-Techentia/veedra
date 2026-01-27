@@ -326,13 +326,13 @@ const ViewProductsPage = () => {
     margin: 0;
     padding: 0;
     font-family: Arial, sans-serif;
-    font-size: 22px;
+    font-size: 12px; /* Base font size increased */
   }
 
   .sticker {
-    width: 80mm;
-    height: 60mm;
-    padding: 1.5mm;
+    width: 75mm;
+    height: 50mm;
+    padding: 2mm 3mm;
     border: 1px solid #000;
     background: white;
     display: flex;
@@ -346,31 +346,40 @@ const ViewProductsPage = () => {
   }
 
   .brand-name {
-    justify-content: center;
-    font-size: 15px;
+    text-align: center;
+    font-size: 14px;
     font-weight: bold;
     margin-bottom: 0.5mm;
-    padding-bottom: 0;
-    text-align: center;
+    text-transform: uppercase;
   }
   
-  .product-info {
-    font-size: 5px;
-    line-height: 1.1;
-  }
-  
-  .info-line {
-    margin-bottom: 0.2mm;
+  .info-row {
+    font-size: 11px;
+    margin-bottom: 1mm;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   
   .label {
-    margin-right: 1mm;
     font-weight: bold;
+    margin-right: 1mm;
   }
   
-  .price-info {
-    margin: 0.5mm 0;
-    font-size: 5px;
+  .row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 11px;
+    margin-bottom: 1mm;
+  }
+
+  .price-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 12px;
+    font-weight: bold;
   }
   
   .barcode {
@@ -380,43 +389,16 @@ const ViewProductsPage = () => {
   }
   
   .barcode-code {
-    font-size: 6px;
-    margin-top: 0;
+    font-size: 10px;
+    margin-top: -2px;
     letter-spacing: 0.5px;
     text-align: center;
   }
 
-  .row {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-  }
-
-  .price-row {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-    margin-top: 2px;
-  }
-
   /* Force Update */
   @media print {
-    body {
-      margin: 0;
-      padding: 0;
-    }
-    
-    .sticker {
-      margin: 0;
-      padding: 1.5mm;
-      border: none;
-      page-break-after: always;
-      page-break-inside: avoid;
-    }
-    
-    .sticker:last-child {
-      page-break-after: auto;
-    }
+    body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .sticker { border: none; page-break-after: always; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
 `;
@@ -444,27 +426,36 @@ const ViewProductsPage = () => {
             <div class="sticker">
               <div class="brand-name">VEEDRA THE BRAND</div>
               
-              <div class="name-field">Name: ${name}</div>
+              <div class="info-row" style="margin-bottom: 0px;">
+                <span class="label" style="font-size: 14px; color: #000;">Name:</span> 
+                <span class="value" style="font-size: 14px; font-weight: bold; color: #000; line-height: 1.2;">${name}</span>
+              </div>
               
-              <div class="row">
-                 <div><span class="label">Category:</span><span class="value">${category}</span></div>
+              <div class="info-row" style="margin-bottom: 0px;">
+                <span class="label" style="font-size: 14px; color: #000;">Category:</span> 
+                <span class="value" style="font-size: 14px; font-weight: bold; color: #000; line-height: 1.2;">${category}</span>
+              </div>
+              
+              <div class="row" style="margin-top: 2mm; align-items: flex-end;">
+                 <div style="flex:1; display: flex; align-items: flex-end; white-space: nowrap;">
+                    <span class="label" style="font-size: 14px;">Color :</span> 
+                 </div>
+                 <div style="flex:1; display: flex; align-items: flex-end; justify-content: flex-end; white-space: nowrap;">
+                    <span class="label" style="font-size: 14px;">Size:</span> 
+                    <span style="width: 15mm; display: inline-block;"></span>
+                 </div>
               </div>
 
-              <div class="row" style="margin-top: 5px; margin-bottom: 5px;">
-                 <div style="flex:1"><span class="label">Color :</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
-                 <div style="flex:1; text-align:right;"><span class="label">Size:</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
+              <div class="price-row" style="margin-top: 3mm;">
+                 ${mrp ? `<div style="flex:1;"><span class="label" style="font-size: 16px;">MRP:</span> <span class="value" style="font-size: 16px;">₹${mrp}</span></div>` : ''}
+                 ${offerPrice ? `<div style="flex:1; text-align:right;"><span class="label" style="font-size: 16px;">Offer:</span> <span class="value" style="font-size: 16px;">₹${offerPrice}</span></div>` : ''}
               </div>
 
-              <div class="price-row">
-                 ${mrp ? `<div><span class="label">MRP:</span><span class="value">₹${mrp}</span></div>` : ''}
-                 ${offerPrice ? `<div><span class="label">Offer:</span><span class="value">₹${offerPrice}</span></div>` : ''}
-              </div>
+              ${comboText ? `<div class="combo-offer" style="text-align: center; font-weight: bold; margin-top: 1mm; font-size: 14px;">Combo Offer : ${comboText}</div>` : ''}
 
-              ${comboText ? `<div class="combo-offer" style="text-align: center; font-weight: bold; margin-top: 5px;">Combo Offer : ${comboText}</div>` : ''}
-
-              <div class="barcode">
+              <div class="barcode" style="margin-top: auto;">
                 <svg id="barcode-${i}"></svg>
-                <div class="barcode-code">Code: ${p.code}</div>
+                <div class="barcode-code" style="font-weight: bold; font-size: 11px;">Code: ${p.code}</div>
               </div>
             </div>
           `;
@@ -475,9 +466,9 @@ const ViewProductsPage = () => {
         <script>
           ${list.map((p, i) => `
            JsBarcode("#barcode-${i}", "${p.code}", {
-  format: "CODE128",
-  width: 1.0,  // Fixed width
-  height: ${parseInt(dimensions.barcodeHeight) - 8},
+              format: "CODE128",
+              width: 1.5,  // Increased width
+              height: ${parseInt(dimensions.barcodeHeight) + 5}, // Reduced extra height to fit code
               displayValue: false,
               margin: 1
             });
@@ -516,13 +507,13 @@ const ViewProductsPage = () => {
     margin: 0;
     padding: 0;
     font-family: Arial, sans-serif;
-     font-size: 22px;
+    font-size: 12px;
   }
-  
+
   .sticker {
     width: 75mm;
     height: 50mm;
-    padding: 1.5mm;
+    padding: 2mm 3mm;
     border: 1px solid #000;
     background: white;
     box-sizing: border-box;
@@ -532,22 +523,19 @@ const ViewProductsPage = () => {
     position: relative;
     overflow: hidden;
   }
-  
+
   .brand-name {
-    font-size: 11px;
+    text-align: center;
+    font-size: 14px;
     font-weight: bold;
     margin-bottom: 0.5mm;
-    padding-bottom: 0;
-    text-align: center;
+    text-transform: uppercase;
   }
   
-  .product-info {
-    font-size: 10px;
-    line-height: 1.1;
-  }
-  
-  .info-line {
-    margin-bottom: 0.2mm;
+  .info-row {
+    font-size: 11px;
+    margin-bottom: 1mm;
+    line-height: normal;
   }
   
   .label {
@@ -555,9 +543,20 @@ const ViewProductsPage = () => {
     margin-right: 1mm;
   }
   
-  .price-info {
-    margin: 0.5mm 0;
+  .row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
     font-size: 11px;
+    margin-bottom: 1mm;
+  }
+
+  .price-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 12px;
+    font-weight: bold;
   }
   
   .barcode {
@@ -568,35 +567,15 @@ const ViewProductsPage = () => {
   
   .barcode-code {
     text-align: center;
-    font-size: 9px;
-    margin-top: 0;
+    font-size: 10px;
+    margin-top: -2px;
     letter-spacing: 0.5px;
-  }
-
-  .row {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-  }
-
-  .price-row {
-    display: flex;
-    justify-content: space-between;
-    width: 100%;
-    margin-top: 2px;
+    font-weight: bold;
   }
   
   @media print {
-    body {
-      margin: 0;
-      padding: 0;
-    }
-    
-    .sticker {
-      margin: 0;
-      padding: 1.5mm;
-      border: none;
-    }
+    body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .sticker { border: none; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
 `;
@@ -607,27 +586,36 @@ const ViewProductsPage = () => {
             <div class="sticker">
               <div class="brand-name">VEEDRA THE BRAND</div>
               
-              <div class="name-field">Name: ${p.name || ''}</div>
+              <div class="info-row" style="margin-bottom: 0px;">
+                <span class="label" style="font-size: 14px; color: #000;">Name:</span> 
+                <span class="value" style="font-size: 14px; font-weight: bold; color: #000; line-height: 1.2;">${p.name || ''}</span>
+              </div>
               
-              <div class="row">
-                 <div><span class="label">Category:</span><span class="value">${p.category?.name || ''}</span></div>
+              <div class="info-row" style="margin-bottom: 0px;">
+                <span class="label" style="font-size: 14px; color: #000;">Category:</span> 
+                <span class="value" style="font-size: 14px; font-weight: bold; color: #000; line-height: 1.2;">${p.category?.name || ''}</span>
               </div>
 
-              <div class="row" style="margin-top: 5px; margin-bottom: 5px;">
-                 <div style="flex:1"><span class="label">Color :</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
-                 <div style="flex:1; text-align:right;"><span class="label">Size:</span><span class="value" style="display:inline-block; width: 60px;">&nbsp;</span></div>
+              <div class="row" style="margin-top: 2mm; align-items: flex-end;">
+                 <div style="flex:1; display: flex; align-items: flex-end; white-space: nowrap;">
+                    <span class="label" style="font-size: 14px;">Color :</span> 
+                 </div>
+                 <div style="flex:1; display: flex; align-items: flex-end; justify-content: flex-end; white-space: nowrap;">
+                    <span class="label" style="font-size: 14px;">Size:</span> 
+                    <span style="width: 15mm; display: inline-block;"></span>
+                 </div>
               </div>
 
-              <div class="price-row">
-                 ${p.pricing?.mrp ? `<div><span class="label">MRP:</span><span class="value">₹${p.pricing.mrp}</span></div>` : ''}
-                 ${(p.offerPrice || p.pricing?.discountedPrice || p.pricing?.offerPrice) ? `<div><span class="label">Offer:</span><span class="value">₹${p.offerPrice || p.pricing?.discountedPrice || p.pricing?.offerPrice}</span></div>` : ''}
+              <div class="price-row" style="margin-top: 3mm;">
+                 ${p.pricing?.mrp ? `<div style="flex:1;"><span class="label" style="font-size: 16px;">MRP:</span> <span class="value" style="font-size: 16px;">₹${p.pricing.mrp}</span></div>` : ''}
+                 ${(p.offerPrice || p.pricing?.discountedPrice || p.pricing?.offerPrice) ? `<div style="flex:1; text-align:right;"><span class="label" style="font-size: 16px;">Offer:</span> <span class="value" style="font-size: 16px;">₹${p.offerPrice || p.pricing?.discountedPrice || p.pricing?.offerPrice}</span></div>` : ''}
               </div>
 
-              ${comboText ? `<div class="combo-offer" style="text-align: center; font-weight: bold; margin-top: 5px;">Combo Offer : ${comboText}</div>` : ''}
+              ${comboText ? `<div class="combo-offer" style="text-align: center; font-weight: bold; margin-top: 1mm; font-size: 14px;">Combo Offer : ${comboText}</div>` : ''}
 
-              <div class="barcode">
+              <div class="barcode" style="margin-top: auto;">
                 <svg id="barcode-single"></svg>
-                <div class="barcode-code">Code: ${p.code}</div>
+                <div class="barcode-code" style="font-weight: bold; font-size: 11px;">Code: ${p.code}</div>
               </div>
             </div>
       `;
@@ -636,9 +624,9 @@ const ViewProductsPage = () => {
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
         <script>
           JsBarcode("#barcode-single", "${p.code}", {
-  format: "CODE128",
-  width: 1.0,  // Fixed width instead of conditional
-  height: ${parseInt(dimensions.barcodeHeight) - 8},
+            format: "CODE128",
+            width: 1.5,  // Increased width
+            height: ${parseInt(dimensions.barcodeHeight) + 5}, // Reduced extra height to fit code
             displayValue: false,
             margin: 1
           });

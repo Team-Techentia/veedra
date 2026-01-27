@@ -101,6 +101,7 @@ const POSBillingPage = () => {
   const [pointsToEarn, setPointsToEarn] = useState(0);
   const [pointsApplied, setPointsApplied] = useState(false);
   const [pointPrice, setPointPrice] = useState(1); // Default 1 point = ₹1
+  const [productPoints, setProductPoints] = useState([]); // Per-product points breakdown
 
   // Refs
   const barcodeInputRef = useRef(null);
@@ -174,6 +175,16 @@ const POSBillingPage = () => {
     };
   }, [isScanning]);
 
+  // Calculate per-product points when cart or combos change
+  useEffect(() => {
+    if (cart.length > 0 || selectedCombos.length > 0) {
+      calculateProductPoints();
+    } else {
+      setProductPoints([]);
+      setPointsToEarn(0);
+    }
+  }, [cart, selectedCombos]);
+
   // Fetch wallet when phone number changes
   useEffect(() => {
     if (customerInfo.phone && /^\d{10}$/.test(customerInfo.phone)) {
@@ -184,14 +195,7 @@ const POSBillingPage = () => {
     }
   }, [customerInfo.phone]);
 
-  // Calculate points to earn when cart changes
-  useEffect(() => {
-    if (cart.length > 0 || selectedCombos.length > 0) {
-      calculatePointsToEarnFromBill();
-    } else {
-      setPointsToEarn(0);
-    }
-  }, [cart, selectedCombos]);
+
 
   const loadData = async () => {
     setLoading(true);
@@ -714,6 +718,19 @@ const POSBillingPage = () => {
       setLoadingWallet(true);
       const response = await walletService.getWalletByPhone(phone);
       setWalletData(response.data);
+
+      // Auto-populate customer name from wallet/history
+      if (response.data && response.data.customerName && response.data.customerName !== 'Customer') {
+        const fetchedName = response.data.customerName;
+        setCustomerInfo(prev => {
+          // Only update if current name is empty on UI
+          if (!prev.name || prev.name.trim() === '') {
+            toast.success(`👤 Customer found: ${fetchedName}`);
+            return { ...prev, name: fetchedName };
+          }
+          return prev;
+        });
+      }
     } catch (error) {
       console.error('Error fetching wallet:', error);
       setWalletData(null);
@@ -739,6 +756,71 @@ const POSBillingPage = () => {
       console.log(`✅ [Points Calculation] Points to earn: ${points} (for ₹${total})`);
     } catch (error) {
       console.error('❌ [Points Calculation] Error calculating points:', error);
+      setPointsToEarn(0);
+    }
+  };
+
+  // Calculate points per product
+  const calculateProductPoints = async () => {
+    try {
+      // Build products array from cart and combos
+      const products = [];
+
+      // Get combo-assigned cart items
+      const assignedCartItemQuantities = getComboAssignments();
+
+      // Add singles from cart
+      cart.forEach(item => {
+        const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
+        const singlesQty = Math.max(0, item.quantity - assignedQty);
+
+        if (singlesQty > 0) {
+          const price = Number(item.pricing?.offerPrice || item.price || 0);
+          products.push({
+            productId: item._id,
+            productName: item.name,
+            price: price,
+            quantity: singlesQty
+          });
+        }
+      });
+
+      // Add combo products
+      selectedCombos.forEach(combo => {
+        const allSlotsFilled = combo.slots?.every(slot => slot.assigned) || false;
+        if (allSlotsFilled) {
+          combo.slots.forEach(slot => {
+            if (slot.assigned) {
+              const adjustedPrice = calculateAdjustedPrice(combo, slot);
+              products.push({
+                productId: slot.assigned.product._id,
+                productName: slot.assigned.product.name,
+                price: adjustedPrice,
+                quantity: slot.assigned.qty || 1
+              });
+            }
+          });
+        }
+      });
+
+      if (products.length === 0) {
+        setProductPoints([]);
+        setPointsToEarn(0);
+        return;
+      }
+
+      // Call the API
+      const response = await walletService.calculatePointsPerProduct(products);
+      const { products: productsWithPoints, totalPoints } = response.data;
+
+      setProductPoints(productsWithPoints);
+      setPointsToEarn(totalPoints);
+
+      console.log('✅ [Per-Product Points] Calculated:', productsWithPoints);
+      console.log('✅ [Total Points] To Earn:', totalPoints);
+    } catch (error) {
+      console.error('❌ [Per-Product Points] Error:', error);
+      setProductPoints([]);
       setPointsToEarn(0);
     }
   };
@@ -1083,7 +1165,8 @@ const POSBillingPage = () => {
             return {
               totalPoints: closingBalance,
               redeemedPoints: redeemedPoints,
-              pointValue: pointValue
+              pointValue: pointValue,
+              pointsEarned: pointsToEarn || 0
             };
           }
           return null;
@@ -1099,7 +1182,8 @@ const POSBillingPage = () => {
           paymentAmounts.cash > 0 ? 'cash' : 'upi',
         receivedAmount: paidAmount,
         change: Math.max(0, paidAmount - totalAmount),
-        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
+        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned)),
+        pointsBreakdown: productPoints
       };
 
       console.log('💾 Bill data prepared:', billData);
@@ -2031,7 +2115,7 @@ const POSBillingPage = () => {
                   </div>
                 )}
 
-                <div className="border-t border-blue-200 pt-2 mt-3">
+                <div className="border-t border-blue-200 pt-2 mt-3 ">
                   <div className="flex justify-between text-xl font-bold">
                     <span className="text-gray-800">{pointsApplied ? 'NET PAYABLE:' : 'GRAND TOTAL:'}</span>
                     <span className="text-blue-700">{fmt(calculateFinalTotal())}</span>
@@ -2043,6 +2127,39 @@ const POSBillingPage = () => {
                       💰 You Saved:
                     </span>
                     <span className="text-green-800 font-bold">{fmt(calculateTotalSavings())}</span>
+                  </div>
+                )}
+
+                {/* Wallet Points Breakdown */}
+                {productPoints.length > 0 && (
+                  <div className="border-t border-gray-200 pt-3 mt-3">
+                    <div className="bg-gradient-to-r from-yellow-50 to-amber-50 rounded-lg p-3 border border-yellow-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-semibold text-gray-800 flex items-center text-sm">
+                          🎁 Wallet Points Breakdown
+                        </h4>
+                      </div>
+
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {productPoints.map((product, index) => (
+                          <div key={index} className="flex justify-between text-xs">
+                            <span className="text-gray-700 truncate flex-1">
+                              {product.productName} (₹{product.totalPrice})
+                            </span>
+                            <span className="text-amber-700 font-medium ml-2">
+                              +{product.points} pts
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="border-t border-amber-200 mt-2 pt-2">
+                        <div className="flex justify-between text-sm font-bold">
+                          <span className="text-gray-800">Total Points to Earn:</span>
+                          <span className="text-amber-700">+{pointsToEarn} points</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2188,7 +2305,8 @@ const POSBillingPage = () => {
                           paymentAmounts.cash > 0 ? 'cash' : 'upi',
                         receivedAmount: (paymentAmounts.cash || 0) + (paymentAmounts.upi || 0),
                         change: Math.max(0, ((paymentAmounts.cash || 0) + (paymentAmounts.upi || 0)) - calculateFinalTotal()),
-                        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned))
+                        combos: selectedCombos.filter(combo => combo.slots?.every(slot => slot.assigned)),
+                        pointsBreakdown: productPoints
                       };
 
                       printReceiptWithData(previewBill);

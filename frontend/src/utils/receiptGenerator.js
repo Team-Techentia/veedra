@@ -341,9 +341,9 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span class="bold">- ${fmt(actualDiscount)}</span>
               </div>
               <div class="solid-divider"></div>
-              <div class="flex-between">
-                <span>Net Payable:</span>
-                <span>${fmt(totalMRP - actualDiscount)}</span>
+              <div class="flex-between" style="margin: 2mm 0; padding: 1mm 0; border-bottom: 1px solid #000;">
+                <span class="bold" style="font-size: 16px;">Net Payable:</span>
+                <span class="bold" style="font-size: 22px;">${fmt(bill.total !== undefined ? bill.total : (totalMRP - actualDiscount))}</span>
               </div>
               
               ${(bill.loyalty) ? `
@@ -417,7 +417,18 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           </div>
           <div class="flex-between">
              <span>Points From this bill :</span>
-             <span class="bold">${bill.loyalty.pointsEarned || 0}</span>
+             <span class="bold" style="font-size: 10px;">
+               ${(() => {
+        if (bill.pointsBreakdown && bill.pointsBreakdown.length > 0) {
+          const breakdownString = bill.pointsBreakdown
+            .map(p => `${p.points}`)
+            .join(' + ');
+          const total = bill.loyalty.pointsEarned || 0;
+          return `${breakdownString} = ${total}`;
+        }
+        return bill.loyalty.pointsEarned || 0;
+      })()}
+             </span>
           </div>
           ` : ''}
         </div>
@@ -433,6 +444,22 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
             <div style="margin-top: 1mm; font-style: italic;">*GST: 5% (≤₹2500) | 12% (>₹2500)</div>
           </div>
         </div>
+
+        ${bill.pointsBreakdown && bill.pointsBreakdown.length > 0 ? `
+        <div class="divider"></div>
+        <div class="center">
+          <div class="bold small">Points Breakdown</div>
+          <div style="font-size: 10px; margin-top: 1mm; text-align: left;">
+            ${(() => {
+        const breakdownString = bill.pointsBreakdown
+          .map(p => `${p.points} (${p.productName.substring(0, 10)}..)`)
+          .join(' + ');
+        const totalPoints = bill.pointsBreakdown.reduce((sum, p) => sum + p.points, 0);
+        return `<div style="word-wrap: break-word;">${breakdownString} = ${totalPoints} Pts</div>`;
+      })()}
+          </div>
+        </div>
+        ` : ''}
         
         <div class="divider"></div>
         
