@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
-import { 
-  Plus, 
-  Search, 
-  Trash2, 
+import {
+  Plus,
+  Search,
+  Trash2,
   Calculator,
   ShoppingCart,
   User,
@@ -26,7 +26,7 @@ const BillingPage = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
   console.log('BillingPage user:', user);
-  
+
   const [cart, setCart] = useState([]);
   const [products, setProducts] = useState([]);
   const [customer, setCustomer] = useState({
@@ -43,7 +43,7 @@ const BillingPage = () => {
   const [scanningMode, setScanningMode] = useState(false);
   const [cameraScanning, setCameraScanning] = useState(false);
   const [scanHistory, setScanHistory] = useState([]);
-  
+
   // Refs for barcode scanning
   const barcodeInputRef = useRef(null);
   const scanTimeoutRef = useRef(null);
@@ -67,10 +67,10 @@ const BillingPage = () => {
         productService.getProducts(),
         comboService.getCombos()
       ]);
-      
+
       console.log('Products response:', productsData);
       console.log('Combos response:', combosData);
-      
+
       setProducts(productsData.data || productsData || []);
       setAvailableCombos(combosData.data || combosData || []);
     } catch (error) {
@@ -87,7 +87,7 @@ const BillingPage = () => {
       // If scanning mode is enabled, capture all key presses
       if (scanningMode && e.target !== barcodeInputRef.current) {
         e.preventDefault();
-        
+
         // Focus the barcode input if not already focused
         if (barcodeInputRef.current) {
           barcodeInputRef.current.focus();
@@ -99,7 +99,7 @@ const BillingPage = () => {
 
     if (scanningMode) {
       document.addEventListener('keypress', handleGlobalKeyPress);
-      
+
       // Auto-focus the barcode input when scanning mode is enabled
       if (barcodeInputRef.current) {
         barcodeInputRef.current.focus();
@@ -118,13 +118,13 @@ const BillingPage = () => {
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
       }
-      
+
       // Set a small delay to ensure complete barcode is captured
       scanTimeoutRef.current = setTimeout(() => {
         handleBarcodeScanned(barcodeInput);
       }, 100);
     }
-    
+
     return () => {
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
@@ -134,17 +134,17 @@ const BillingPage = () => {
 
   const handleBarcodeScanned = async (barcode, source = 'manual') => {
     setIsScanning(true);
-    
+
     // Add to scan history
     setScanHistory(prev => [
       { barcode, timestamp: new Date(), source },
       ...prev.slice(0, 9) // Keep last 10 scans
     ]);
-    
+
     try {
       // Try API first, fallback to local search
       let product = null;
-      
+
       try {
         const response = await productService.scanProductByBarcode(barcode.trim());
         product = response.data;
@@ -153,33 +153,33 @@ const BillingPage = () => {
         console.warn('API scan failed, using local search:', apiError);
         product = products.find(p => p.barcode === barcode.trim());
       }
-      
+
       if (product) {
         // Add product to cart with scanned flag
         addToCart(product, true);
-        
+
         // Visual feedback
         setIsScanning(false);
-        
+
         // Play success sound (optional)
         playSuccessSound();
-        
+
         console.log(`🔍 ${product.name} scanned via ${source}!`);
-        
+
       } else {
         console.log(`❌ Product not found for barcode: ${barcode}`);
         setIsScanning(false);
       }
-      
+
     } catch (error) {
       console.error('Barcode scan error:', error);
       console.log('Error processing barcode scan');
       setIsScanning(false);
     }
-    
+
     // Clear barcode input for next scan
     setBarcodeInput('');
-    
+
     // Keep focus on barcode input if scanning mode is still active
     if (scanningMode && barcodeInputRef.current) {
       setTimeout(() => {
@@ -193,14 +193,14 @@ const BillingPage = () => {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
-    
+
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
-    
+
     oscillator.frequency.value = 800; // Frequency in Hz
     gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
-    
+
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + 0.1);
   };
@@ -208,7 +208,7 @@ const BillingPage = () => {
   const toggleScanningMode = () => {
     setScanningMode(!scanningMode);
     setBarcodeInput('');
-    
+
     if (!scanningMode) {
       console.log('🔍 Scanning mode enabled - scan or type barcodes');
       setTimeout(() => {
@@ -238,17 +238,17 @@ const BillingPage = () => {
 
     try {
       setCameraScanning(true);
-      
+
       // First, test camera access
-      const testStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: "environment" } 
+      const testStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" }
       });
-      
+
       // Stop test stream immediately
       testStream.getTracks().forEach(track => track.stop());
-      
+
       console.log('🔄 Initializing camera scanner...');
-      
+
       // Initialize QuaggaJS with comprehensive settings
       Quagga.init({
         inputStream: {
@@ -272,19 +272,19 @@ const BillingPage = () => {
           readers: [
             "code_128_reader",
             "ean_reader",
-            "ean_8_reader", 
+            "ean_8_reader",
             "code_39_reader",
             "upc_reader",
             "upc_e_reader"
           ]
         },
         locate: true
-      }, function(err) {
+      }, function (err) {
         if (err) {
           console.error('QuaggaJS init error:', err);
           let errorMessage = '❌ Camera initialization failed';
           let helpText = '';
-          
+
           if (err.name === 'NotAllowedError') {
             errorMessage = '🚫 Camera permission denied';
             helpText = 'Click the camera icon in your browser\'s address bar to allow access';
@@ -298,12 +298,12 @@ const BillingPage = () => {
             errorMessage = '🔒 Camera in use by another app';
             helpText = 'Close other apps using the camera and try again';
           }
-          
+
           console.log(`${errorMessage}${helpText ? `\n${helpText}` : ''}`);
           setCameraScanning(false);
           return;
         }
-        
+
         console.log("QuaggaJS initialization finished. Ready to start");
         Quagga.start();
         // toast dismissed // Dismiss loading toast
@@ -311,14 +311,14 @@ const BillingPage = () => {
       });
 
       // Listen for successful barcode detection
-      Quagga.onDetected(function(data) {
+      Quagga.onDetected(function (data) {
         const barcode = data.codeResult.code;
         const format = data.codeResult.format;
         console.log(`Barcode detected via camera: ${barcode} (${format})`);
-        
+
         // Stop scanning temporarily to prevent multiple reads
         Quagga.stop();
-        
+
         // Add visual feedback - flash green
         if (scannerContainerRef.current) {
           scannerContainerRef.current.classList.add('barcode-detected');
@@ -328,10 +328,10 @@ const BillingPage = () => {
             }
           }, 500);
         }
-        
+
         // Process the scanned barcode
         handleBarcodeScanned(barcode, `camera-${format}`);
-        
+
         // Brief pause to prevent multiple scans, then restart
         setTimeout(() => {
           if (cameraScanning) {
@@ -345,25 +345,25 @@ const BillingPage = () => {
       });
 
       // Listen for processing events (visual feedback)
-      Quagga.onProcessed(function(result) {
+      Quagga.onProcessed(function (result) {
         const drawingCtx = Quagga.canvas.ctx.overlay;
         const drawingCanvas = Quagga.canvas.dom.overlay;
 
         if (result) {
           // Clear previous drawings
           if (drawingCanvas && drawingCtx) {
-            drawingCtx.clearRect(0, 0, 
-              parseInt(drawingCanvas.getAttribute("width")), 
+            drawingCtx.clearRect(0, 0,
+              parseInt(drawingCanvas.getAttribute("width")),
               parseInt(drawingCanvas.getAttribute("height"))
             );
-            
+
             // Draw detection boxes
             if (result.boxes) {
               result.boxes.filter(function (box) {
                 return box !== result.box;
               }).forEach(function (box) {
-                Quagga.ImageDebug.drawPath(box, {x: 0, y: 1}, drawingCtx, {
-                  color: "green", 
+                Quagga.ImageDebug.drawPath(box, { x: 0, y: 1 }, drawingCtx, {
+                  color: "green",
                   lineWidth: 2
                 });
               });
@@ -371,29 +371,29 @@ const BillingPage = () => {
 
             // Draw main detection box
             if (result.box) {
-              Quagga.ImageDebug.drawPath(result.box, {x: 0, y: 1}, drawingCtx, {
-                color: "#00F", 
+              Quagga.ImageDebug.drawPath(result.box, { x: 0, y: 1 }, drawingCtx, {
+                color: "#00F",
                 lineWidth: 2
               });
             }
 
             // Draw barcode line
             if (result.codeResult && result.codeResult.code) {
-              Quagga.ImageDebug.drawPath(result.line, {x: 'x', y: 'y'}, drawingCtx, {
-                color: 'red', 
+              Quagga.ImageDebug.drawPath(result.line, { x: 'x', y: 'y' }, drawingCtx, {
+                color: 'red',
                 lineWidth: 3
               });
             }
           }
         }
       });
-      
+
     } catch (error) {
       console.error('Camera access error:', error);
-      
+
       let errorMessage = '❌ Camera access failed';
       let helpText = '';
-      
+
       if (error.name === 'NotAllowedError') {
         errorMessage = '🚫 Camera permission denied';
         helpText = 'Please click "Allow" when prompted for camera access';
@@ -409,7 +409,7 @@ const BillingPage = () => {
       } else {
         helpText = 'Try refreshing the page or using a different browser';
       }
-      
+
       console.log(`${errorMessage}\n${helpText}`);
       setCameraScanning(false);
     }
@@ -443,15 +443,25 @@ const BillingPage = () => {
     handleBarcodeScanned(randomProduct.barcode, 'camera');
   };
 
-  const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.barcode.includes(searchTerm)
-  );
+  const filteredProducts = products.filter(product => {
+    const searchLower = searchTerm.toLowerCase();
+    const offerPrice = product.pricing?.offerPrice?.toString() || '';
+
+    // Name, code, barcode - partial match
+    const matchesText =
+      product.name.toLowerCase().includes(searchLower) ||
+      product.code.toLowerCase().includes(searchLower) ||
+      product.barcode.includes(searchTerm);
+
+    // Price - exact match only (prevents "200" matching "2000")  
+    const matchesPrice = offerPrice === searchTerm;
+
+    return matchesText || matchesPrice;
+  });
 
   const addToCart = (product, isScanned = false) => {
     const existingItem = cart.find(item => item._id === product._id);
-    
+
     if (existingItem) {
       if (existingItem.quantity >= (product.inventory?.currentStock || 0)) {
         console.log('Insufficient stock available');
@@ -459,21 +469,21 @@ const BillingPage = () => {
       }
       setCart(cart.map(item =>
         item._id === product._id
-          ? { 
-              ...item, 
-              quantity: item.quantity + 1,
-              lastScanned: isScanned ? new Date() : item.lastScanned
-            }
+          ? {
+            ...item,
+            quantity: item.quantity + 1,
+            lastScanned: isScanned ? new Date() : item.lastScanned
+          }
           : item
       ));
     } else {
-      setCart([...cart, { 
-        ...product, 
+      setCart([...cart, {
+        ...product,
         quantity: 1,
         lastScanned: isScanned ? new Date() : null
       }]);
     }
-    
+
     if (isScanned) {
       console.log(`🔍 ${product.name} scanned and added!`);
     } else {
@@ -486,13 +496,13 @@ const BillingPage = () => {
       setCart(cart.filter(item => item._id !== productId));
       return;
     }
-    
+
     const product = products.find(p => p._id === productId);
     if (quantity > (product.inventory?.currentStock || 0)) {
       console.log('Insufficient stock available');
       return;
     }
-    
+
     setCart(cart.map(item =>
       item._id === productId
         ? { ...item, quantity }
@@ -510,9 +520,9 @@ const BillingPage = () => {
       toast.error('This combo is not currently active');
       return;
     }
-    
+
     const comboProductIds = combo.applicableProducts || combo.products || [];
-    
+
     // If no specific products are required, combo applies to any cart
     if (comboProductIds.length === 0) {
       if (cart.length === 0) {
@@ -524,12 +534,12 @@ const BillingPage = () => {
       toast.success(`${combo.name} applied! Savings: ₹${savings}`);
       return;
     }
-    
+
     // Check if all required products are in cart
     const hasAllComboProducts = comboProductIds.every(productId =>
       cart.some(item => item._id === productId && item.quantity >= 1)
     );
-    
+
     if (!hasAllComboProducts) {
       const missingProducts = comboProductIds.filter(productId =>
         !cart.some(item => item._id === productId && item.quantity >= 1)
@@ -537,7 +547,7 @@ const BillingPage = () => {
       toast.error(`Add all required combo products to cart first (${missingProducts.length} missing)`);
       return;
     }
-    
+
     setSelectedCombo(combo);
     const savings = calculateComboSavings(combo);
     toast.success(`${combo.name} applied! Savings: ₹${savings}`);
@@ -545,7 +555,7 @@ const BillingPage = () => {
 
   const calculateComboSavings = (combo) => {
     if (!combo) return 0;
-    
+
     const cartTotal = calculateSubtotal();
     if (combo.discountType === 'percentage') {
       const discount = (cartTotal * combo.discountValue) / 100;
@@ -578,7 +588,7 @@ const BillingPage = () => {
   const calculateDiscount = () => {
     const subtotal = calculateSubtotal();
     const comboDiscount = calculateComboDiscount();
-    
+
     if (discount.type === 'percentage') {
       return (subtotal * discount.value) / 100;
     } else {
@@ -598,7 +608,7 @@ const BillingPage = () => {
       console.log('Please add items to cart');
       return;
     }
-    
+
     try {
       const billData = {
         customer,
@@ -611,18 +621,18 @@ const BillingPage = () => {
         billedBy: user.name,
         timestamp: new Date()
       };
-      
+
       // Create bill using API
       const createdBill = await billingService.createBill(billData);
-      
+
       console.log('Bill processed successfully!');
-      
+
       // Reset form
       setCart([]);
       setCustomer({ name: '', phone: '', email: '' });
       setDiscount({ type: 'percentage', value: 0 });
       setSelectedCombo(null);
-      
+
       return createdBill;
     } catch (error) {
       console.error('Error processing bill:', error);
@@ -670,21 +680,19 @@ const BillingPage = () => {
             <div className="flex space-x-2">
               <button
                 onClick={toggleScanningMode}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  scanningMode
-                    ? 'bg-red-600 text-white hover:bg-red-700'
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                }`}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${scanningMode
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
               >
                 {scanningMode ? 'Stop Keyboard' : 'Start Keyboard'}
               </button>
               <button
                 onClick={cameraScanning ? stopCameraScanning : startCameraScanning}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  cameraScanning
-                    ? 'bg-purple-600 text-white hover:bg-purple-700'
-                    : 'bg-purple-500 text-white hover:bg-purple-600'
-                }`}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${cameraScanning
+                  ? 'bg-purple-600 text-white hover:bg-purple-700'
+                  : 'bg-purple-500 text-white hover:bg-purple-600'
+                  }`}
               >
                 {cameraScanning ? 'Stop Camera' : 'Start Camera'}
               </button>
@@ -701,13 +709,11 @@ const BillingPage = () => {
                 placeholder={scanningMode ? "Scan barcode here..." : "Enter barcode manually"}
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg text-lg font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                  scanningMode 
-                    ? 'border-blue-500 bg-blue-50' 
-                    : 'border-gray-300'
-                } ${
-                  isScanning ? 'animate-pulse bg-green-50' : ''
-                }`}
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg text-lg font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent ${scanningMode
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-300'
+                  } ${isScanning ? 'animate-pulse bg-green-50' : ''
+                  }`}
                 autoComplete="off"
               />
               {isScanning && (
@@ -724,7 +730,7 @@ const BillingPage = () => {
               Add to Cart
             </button>
           </form>
-          
+
           {/* Scanner Status */}
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
             {scanningMode && (
@@ -733,7 +739,7 @@ const BillingPage = () => {
                 <span>Keyboard Scanner Ready - Use any USB/Bluetooth scanner</span>
               </div>
             )}
-            
+
             {cameraScanning && (
               <div className="flex items-center text-sm text-purple-600 bg-purple-50 p-2 rounded">
                 <span>📹</span>
@@ -752,14 +758,14 @@ const BillingPage = () => {
           {cameraScanning && (
             <div className="mt-4">
               <div className="relative w-full max-w-md mx-auto">
-                <div 
+                <div
                   ref={scannerContainerRef}
                   className="quagga-scanner relative border-2 border-purple-300 rounded-lg overflow-hidden bg-black"
                   style={{ height: '300px' }}
                 >
                   {/* Scanner overlay guides */}
                   <div className="scanner-overlay"></div>
-                  
+
                   {/* Instructions overlay */}
                   <div className="absolute top-4 left-4 right-4 text-white text-center bg-black bg-opacity-50 rounded p-2 z-20">
                     <div className="flex items-center justify-center space-x-2">
@@ -777,7 +783,7 @@ const BillingPage = () => {
                   </div>
                 </div>
               </div>
-              
+
               <div className="text-center mt-3 space-y-2">
                 <p className="text-sm text-gray-600">
                   📹 Real-time barcode detection enabled
@@ -802,7 +808,7 @@ const BillingPage = () => {
               </div>
             </div>
           )}
-          
+
           {/* Quick Test Barcodes */}
           <div className="mt-4 p-3 bg-gray-50 rounded-lg">
             <p className="text-sm font-medium text-gray-700 mb-2">Quick Test (Click to scan):</p>
@@ -828,11 +834,10 @@ const BillingPage = () => {
                   <div key={index} className="flex justify-between text-xs text-gray-600">
                     <span className="font-mono">{scan.barcode}</span>
                     <span className="flex items-center">
-                      <span className={`inline-block w-2 h-2 rounded-full mr-1 ${
-                        scan.source === 'camera' ? 'bg-purple-400' :
+                      <span className={`inline-block w-2 h-2 rounded-full mr-1 ${scan.source === 'camera' ? 'bg-purple-400' :
                         scan.source === 'scanner' ? 'bg-blue-400' :
-                        scan.source === 'test' ? 'bg-yellow-400' : 'bg-gray-400'
-                      }`}></span>
+                          scan.source === 'test' ? 'bg-yellow-400' : 'bg-gray-400'
+                        }`}></span>
                       {scan.source}
                     </span>
                   </div>
@@ -865,7 +870,7 @@ const BillingPage = () => {
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
                 {filteredProducts.map((product) => (
                   <div
@@ -896,7 +901,7 @@ const BillingPage = () => {
                   </div>
                 ))}
               </div>
-              
+
               {filteredProducts.length === 0 && searchTerm && (
                 <div className="text-center py-8 text-gray-500">
                   No products found matching "{searchTerm}"
@@ -917,21 +922,20 @@ const BillingPage = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {availableCombos.filter(combo => combo.isActive).map((combo) => {
                   const eligibleProducts = (combo.applicableProducts || []);
-                  const hasEligibleProducts = eligibleProducts.length === 0 || 
+                  const hasEligibleProducts = eligibleProducts.length === 0 ||
                     eligibleProducts.some(productId => cart.some(item => item._id === productId));
-                  
+
                   if (!hasEligibleProducts) return null;
-                  
+
                   const estimatedSavings = calculateComboSavings(combo);
-                  
+
                   return (
                     <div
                       key={combo._id}
-                      className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                        selectedCombo?._id === combo._id
-                          ? 'border-green-500 bg-green-50'
-                          : 'border-gray-300 hover:border-blue-500'
-                      }`}
+                      className={`border rounded-lg p-4 cursor-pointer transition-colors ${selectedCombo?._id === combo._id
+                        ? 'border-green-500 bg-green-50'
+                        : 'border-gray-300 hover:border-blue-500'
+                        }`}
                       onClick={() => applyCombo(combo)}
                     >
                       <h3 className="font-medium text-gray-900">{combo.name}</h3>
@@ -939,8 +943,8 @@ const BillingPage = () => {
                       <div className="flex justify-between items-center">
                         <div>
                           <p className="text-sm text-gray-600">
-                            {combo.discountType === 'percentage' 
-                              ? `${combo.discountValue}% off` 
+                            {combo.discountType === 'percentage'
+                              ? `${combo.discountValue}% off`
                               : `₹${combo.discountValue} off`}
                           </p>
                           <p className="text-lg font-bold text-green-600">
@@ -949,8 +953,8 @@ const BillingPage = () => {
                         </div>
                         <div className="text-right">
                           <p className="text-xs text-gray-500">
-                            {eligibleProducts.length > 0 
-                              ? `${eligibleProducts.length} products` 
+                            {eligibleProducts.length > 0
+                              ? `${eligibleProducts.length} products`
                               : 'All products'}
                           </p>
                           <button className="text-sm bg-blue-600 text-white px-3 py-1 rounded mt-1">
@@ -1029,17 +1033,16 @@ const BillingPage = () => {
               ) : (
                 <div className="space-y-3 max-h-64 overflow-y-auto">
                   {cart.map((item) => {
-                    const isRecentlyScanned = item.lastScanned && 
+                    const isRecentlyScanned = item.lastScanned &&
                       (new Date() - new Date(item.lastScanned)) < 3000; // 3 seconds
-                    
+
                     return (
-                      <div 
-                        key={item._id} 
-                        className={`flex items-center justify-between border-b pb-3 transition-all duration-300 ${
-                          isRecentlyScanned 
-                            ? 'bg-green-50 border-green-200 animate-pulse' 
-                            : ''
-                        }`}
+                      <div
+                        key={item._id}
+                        className={`flex items-center justify-between border-b pb-3 transition-all duration-300 ${isRecentlyScanned
+                          ? 'bg-green-50 border-green-200 animate-pulse'
+                          : ''
+                          }`}
                       >
                         <div className="flex-1">
                           <div className="flex items-center">
@@ -1126,15 +1129,15 @@ const BillingPage = () => {
                     <span>Subtotal:</span>
                     <span>₹{calculateSubtotal().toLocaleString()}</span>
                   </div>
-                  
+
                   {selectedCombo && (
                     <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
                       <div className="flex justify-between items-center">
                         <div>
                           <p className="text-sm font-medium text-green-800">{selectedCombo.name}</p>
                           <p className="text-xs text-green-600">
-                            {selectedCombo.discountType === 'percentage' 
-                              ? `${selectedCombo.discountValue}% off` 
+                            {selectedCombo.discountType === 'percentage'
+                              ? `${selectedCombo.discountValue}% off`
                               : `₹${selectedCombo.discountValue} off`}
                           </p>
                         </div>
@@ -1142,7 +1145,7 @@ const BillingPage = () => {
                           <span className="text-green-600 font-medium">
                             -₹{calculateComboDiscount().toLocaleString()}
                           </span>
-                          <button 
+                          <button
                             onClick={removeCombo}
                             className="text-red-500 hover:text-red-700 text-xs p-1"
                             title="Remove combo"
@@ -1153,14 +1156,14 @@ const BillingPage = () => {
                       </div>
                     </div>
                   )}
-                  
+
                   {discount.value > 0 && (
                     <div className="flex justify-between text-blue-600">
                       <span>Additional Discount:</span>
                       <span>-₹{calculateDiscount().toLocaleString()}</span>
                     </div>
                   )}
-                  
+
                   <div className="flex justify-between text-lg font-bold border-t pt-2">
                     <span>Total:</span>
                     <span>₹{calculateTotal().toLocaleString()}</span>
@@ -1195,34 +1198,31 @@ const BillingPage = () => {
           <div className="bg-white rounded-lg max-w-md w-full">
             <div className="p-6">
               <h3 className="text-lg font-medium mb-4">Payment</h3>
-              
+
               {/* Payment Method Selection */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={() => setPaymentMethod('cash')}
-                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${
-                      paymentMethod === 'cash' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                    }`}
+                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${paymentMethod === 'cash' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                      }`}
                   >
                     <Banknote className="h-5 w-5" />
                     <span className="text-xs">Cash</span>
                   </button>
                   <button
                     onClick={() => setPaymentMethod('card')}
-                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${
-                      paymentMethod === 'card' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                    }`}
+                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                      }`}
                   >
                     <CreditCard className="h-5 w-5" />
                     <span className="text-xs">Card</span>
                   </button>
                   <button
                     onClick={() => setPaymentMethod('upi')}
-                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${
-                      paymentMethod === 'upi' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                    }`}
+                    className={`p-3 border rounded-lg flex flex-col items-center gap-1 ${paymentMethod === 'upi' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                      }`}
                   >
                     <Smartphone className="h-5 w-5" />
                     <span className="text-xs">UPI</span>

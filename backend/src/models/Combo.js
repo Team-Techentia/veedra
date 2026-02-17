@@ -23,7 +23,7 @@ const comboSchema = new mongoose.Schema({
     enum: ['Blue', 'Green', 'Orange', 'Pink', 'Yellow', 'Purple', 'Red'],
     default: 'Blue'
   },
-  
+
   // Validity Period
   validFrom: {
     type: Date,
@@ -33,7 +33,7 @@ const comboSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
-  
+
   // Pricing
   offerPrice: {
     type: Number,
@@ -45,14 +45,90 @@ const comboSchema = new mongoose.Schema({
     required: true,
     min: [1, 'Quantity of products must be at least 1']
   },
-  
+
   // Notes
   notes: {
     type: String,
     maxlength: [1000, 'Notes cannot exceed 1000 characters'],
     default: ''
   },
-  
+
+  // Combo Type - Support for different combo types
+  comboType: {
+    type: String,
+    enum: ['slot_based', 'price_range', 'quantity_slab'],
+    default: 'slot_based'
+  },
+
+  // Price Range Configuration - For automatic price-based discounts
+  priceRangeConfig: {
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    minPrice: {
+      type: Number,
+      min: [0, 'Min price cannot be negative'],
+      default: 0
+    },
+    maxPrice: {
+      type: Number,
+      min: [0, 'Max price cannot be negative'],
+      default: 0
+    },
+    comboPrice: {
+      type: Number,
+      min: [0, 'Combo price cannot be negative'],
+      default: 0
+    },
+    autoApply: {
+      type: Boolean,
+      default: true
+    }
+  },
+
+  // Quantity Slab Configuration - For quantity-based pricing
+  quantitySlabConfig: {
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    minPrice: {
+      type: Number,
+      min: [0, 'Min price cannot be negative'],
+      default: 0
+    },
+    maxPrice: {
+      type: Number,
+      min: [0, 'Max price cannot be negative'],
+      default: 0
+    },
+    slabs: [{
+      minQuantity: {
+        type: Number,
+        required: true,
+        min: [1, 'Min quantity must be at least 1']
+      },
+      maxQuantity: {
+        type: Number,
+        default: null // null means unlimited
+      },
+      slabPrice: {
+        type: Number,
+        required: true,
+        min: [0, 'Slab price cannot be negative']
+      }
+    }],
+    applyLastSlabForHigher: {
+      type: Boolean,
+      default: true
+    },
+    autoApply: {
+      type: Boolean,
+      default: true
+    }
+  },
+
   // Rules Configuration
   rules: {
     allowMix: {
@@ -82,13 +158,13 @@ const comboSchema = new mongoose.Schema({
       }
     }]
   },
-  
+
   // Status
-  paused: {
+  isActive: {
     type: Boolean,
-    default: false
+    default: true  // New combos are active by default
   },
-  
+
   // System Fields
   createdAt: {
     type: Date,
@@ -101,18 +177,18 @@ const comboSchema = new mongoose.Schema({
 // Indexes for better performance
 comboSchema.index({ sku: 1 });
 comboSchema.index({ type: 1 });
-comboSchema.index({ paused: 1 });
+comboSchema.index({ isActive: 1 });
 comboSchema.index({ validFrom: 1, validTo: 1 });
 
 // Generate combo SKU
-comboSchema.pre('save', async function(next) {
+comboSchema.pre('save', async function (next) {
   if (this.isNew && (!this.sku || this.sku.trim() === '')) {
     try {
       // Find the highest existing SKU number
       const existingCombos = await this.constructor.find({ sku: { $regex: /^CMB-\d{4}$/ } })
         .sort({ sku: -1 })
         .limit(10);
-      
+
       let maxNumber = 0;
       for (const combo of existingCombos) {
         const numberPart = parseInt(combo.sku.substring(4));
@@ -120,7 +196,7 @@ comboSchema.pre('save', async function(next) {
           maxNumber = numberPart;
         }
       }
-      
+
       const nextNumber = maxNumber + 1;
       this.sku = `CMB-${nextNumber.toString().padStart(4, '0')}`;
     } catch (error) {
@@ -134,38 +210,38 @@ comboSchema.pre('save', async function(next) {
 });
 
 // Method to check combo status
-comboSchema.methods.getStatus = function() {
+comboSchema.methods.getStatus = function () {
   if (this.paused) return 'paused';
-  
+
   const today = new Date();
   const start = this.validFrom ? new Date(this.validFrom) : null;
   const end = this.validTo ? new Date(this.validTo) : null;
-  
+
   if (start && today < start) return 'upcoming';
   if (end && today > end) return 'expired';
-  
+
   return 'active';
 };
 
 // Method to compute slot bands for price calculations
-comboSchema.methods.computeSlotBands = function() {
+comboSchema.methods.computeSlotBands = function () {
   const slots = this.rules?.slots || [];
   let minMRP = 0, maxMRP = 0;
   let totalQty = slots.length || 0;
-  
+
   for (const slot of slots) {
     minMRP += slot.minPrice || 0;
     maxMRP += slot.maxPrice || 0;
   }
-  
+
   const minAt15 = Math.round(minMRP * 0.85); // 15% discount assumption
   const maxAt15 = Math.round(maxMRP * 0.85);
-  
+
   return { minMRP, maxMRP, minAt15, maxAt15, totalQty };
 };
 
 // Static method to get active combos
-comboSchema.statics.getActiveCombos = function() {
+comboSchema.statics.getActiveCombos = function () {
   const now = new Date();
   return this.find({
     paused: false,
@@ -181,5 +257,62 @@ comboSchema.statics.getActiveCombos = function() {
     ]
   }).sort({ createdAt: -1 });
 };
+
+// Static method to get active price-range combos
+comboSchema.statics.getActivePriceRangeCombos = function () {
+  const now = new Date();
+  return this.find({
+    comboType: 'price_range',
+    'priceRangeConfig.enabled': true,
+    'priceRangeConfig.autoApply': true,
+    paused: false,
+    $or: [
+      {
+        $and: [
+          { validFrom: { $lte: now } },
+          { validTo: { $gte: now } }
+        ]
+      },
+      { validFrom: null, validTo: null },
+      {
+        validFrom: { $lte: now },
+        validTo: null
+      },
+      {
+        validFrom: null,
+        validTo: { $gte: now }
+      }
+    ]
+  }).sort({ 'priceRangeConfig.comboPrice': 1 });
+};
+
+// Static method to get active quantity slab combos
+comboSchema.statics.getActiveQuantitySlabCombos = function () {
+  const now = new Date();
+  return this.find({
+    comboType: 'quantity_slab',
+    'quantitySlabConfig.enabled': true,
+    'quantitySlabConfig.autoApply': true,
+    paused: false,
+    $or: [
+      {
+        $and: [
+          { validFrom: { $lte: now } },
+          { validTo: { $gte: now } }
+        ]
+      },
+      { validFrom: null, validTo: null },
+      {
+        validFrom: { $lte: now },
+        validTo: null
+      },
+      {
+        validFrom: null,
+        validTo: { $gte: now }
+      }
+    ]
+  }).sort({ 'quantitySlabConfig.basePrice': 1 });
+};
+
 
 module.exports = mongoose.model('Combo', comboSchema);

@@ -27,6 +27,7 @@ import AddVendorPage from './pages/vendors/AddVendorPage'
 import CombosPage from './pages/combos/NewCombosPage'
 import CreateComboPage from './pages/combos/CreateComboPage'
 import EditComboPage from './pages/combos/EditComboPage'
+import AutoComboPage from './pages/combo/AutoComboPage'
 
 // Billing
 import BillingPage from './pages/billing/BillingPage'
@@ -47,6 +48,16 @@ import WalletSettings from './pages/wallets/WalletSettings'
 // Settings
 import SettingsPage from './pages/settings/SettingsPage'
 import UsersPage from './pages/users/UsersPage'
+
+// Loyalty
+import LoyaltyPointsPanel from './pages/loyalty/LoyaltyPointsPanel'
+
+// Delivery
+import DeliveryLabelPage from './pages/delivery/DeliveryLabelPage'
+import ExchangeSlipPage from './pages/print/ExchangeSlipPage'
+
+// Print Pages
+import LoyaltyPointsPrintPage from './pages/print/LoyaltyPointsPrintPage'
 
 function App() {
   const { user, isAuthenticated } = useSelector((state) => state.auth)
@@ -150,6 +161,11 @@ function App() {
               <EditComboPage />
             </ProtectedRoute>
           } />
+          <Route path="combos/auto" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager']}>
+              <AutoComboPage />
+            </ProtectedRoute>
+          } />
 
           {/* Billing - All Roles */}
           <Route path="billing" element={
@@ -201,10 +217,39 @@ function App() {
             </ProtectedRoute>
           } />
 
+          {/* Loyalty Points Panel - All Roles */}
+          <Route path="loyalty" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
+              <LoyaltyPointsPanel />
+            </ProtectedRoute>
+          } />
+
           {/* User Management - Owner Only */}
           <Route path="users" element={
             <ProtectedRoute allowedRoles={['owner']}>
               <UsersPage />
+            </ProtectedRoute>
+          } />
+
+          {/* Print Menu - All Roles */}
+          <Route path="print/loyalty" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
+              <LoyaltyPointsPanel />
+            </ProtectedRoute>
+          } />
+          <Route path="print/delivery" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
+              <DeliveryLabelPage />
+            </ProtectedRoute>
+          } />
+          <Route path="print/exchange" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
+              <ExchangeSlipPage />
+            </ProtectedRoute>
+          } />
+          <Route path="print/bill" element={
+            <ProtectedRoute allowedRoles={['owner', 'manager', 'staff']}>
+              <LoyaltyPointsPrintPage />
             </ProtectedRoute>
           } />
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Loader2, AlertCircle, Printer, Search } from 'lucide-react';
+import { Save, Loader2, AlertCircle } from 'lucide-react';
 import walletService from '../../services/walletService';
 import toast from 'react-hot-toast';
 import axios from 'axios';
@@ -10,11 +10,6 @@ const WalletSettings = () => {
     const [savingId, setSavingId] = useState(null);
     const [pointConfig, setPointConfig] = useState(null);
     const [savingConfig, setSavingConfig] = useState(false);
-
-    // Print Bill State
-    const [printMobile, setPrintMobile] = useState('');
-    const [printWalletData, setPrintWalletData] = useState(null);
-    const [loadingPrintData, setLoadingPrintData] = useState(false);
 
     useEffect(() => {
         fetchRules();
@@ -291,139 +286,6 @@ const WalletSettings = () => {
                     💡 <strong>Tip:</strong> Make sure there are no gaps between ranges to ensure all purchase amounts are covered.
                 </p>
             </div>
-
-            {/* Print Bill Section */}
-            <div className="mt-8 bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-                <div className="flex items-center gap-2 mb-4">
-                    <Printer className="h-6 w-6 text-indigo-600" />
-                    <h2 className="text-xl font-bold text-gray-900">Print Loyalty Points Slip</h2>
-                </div>
-
-                <div className="flex gap-4 items-end">
-                    <div className="flex-1 max-w-md">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Customer Mobile Number
-                        </label>
-                        <div className="relative">
-                            <input
-                                type="text"
-                                value={printMobile}
-                                onChange={(e) => setPrintMobile(e.target.value)}
-                                placeholder="Enter mobile number"
-                                className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                onKeyDown={(e) => e.key === 'Enter' && handleFetchPrintWallet()}
-                            />
-                            <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                                {loadingPrintData ? (
-                                    <Loader2 className="h-4 w-4 text-gray-400 animate-spin" />
-                                ) : (
-                                    <Search className="h-4 w-4 text-gray-400" />
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                    <button
-                        onClick={handleFetchPrintWallet}
-                        disabled={loadingPrintData}
-                        className="px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors"
-                    >
-                        Search
-                    </button>
-
-                    {printWalletData && (
-                        <button
-                            onClick={handlePrintSlip}
-                            className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm flex items-center"
-                        >
-                            <Printer className="h-4 w-4 mr-2" />
-                            Print Bill
-                        </button>
-                    )}
-                </div>
-
-                {/* Preview Area */}
-                {printWalletData && (
-                    <div className="mt-6 border border-gray-200 rounded-lg p-4 bg-gray-50 max-w-md">
-                        <p className="text-sm text-gray-500 mb-2 font-medium">Preview:</p>
-                        <div className="bg-white p-4 shadow-sm border border-gray-100 font-mono text-sm leading-relaxed">
-                            <div className="text-center font-bold mb-2">
-                                <div className="text-lg">VEEDRA THE BRAND</div>
-                                <div>LOYALTY POINTS SLIP</div>
-                            </div>
-                            <div className="border-b-2 border-dashed border-gray-300 my-2"></div>
-
-                            <div className="space-y-1">
-                                <div className="flex gap-2">
-                                    <span>NAME :</span>
-                                    <span className="font-semibold">{printWalletData.customerName || printWalletData.name || 'Customer'}</span>
-                                </div>
-                                <div>
-                                    <span>MOBILE : </span>
-                                    <span className="font-semibold">{printWalletData.phone}</span>
-                                </div>
-                                <div>
-                                    <span>DATE : </span>
-                                    <span>{new Date().toLocaleString()}</span>
-                                </div>
-                            </div>
-
-                            <div className="border-b-2 border-dashed border-gray-300 my-2"></div>
-
-                            <div className="text-center py-2">
-                                <div className="text-3xl font-bold">{Math.floor(printWalletData.points || 0)} POINTS</div>
-                            </div>
-
-                            <div className="border-b-2 border-dashed border-gray-300 my-2"></div>
-
-                            <div className="text-center font-semibold mt-2">
-                                <div>THANK YOU</div>
-                                <div>VISIT AGAIN</div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Hidden Printable Area */}
-            {printWalletData && (
-                <div id="printable-slip" className="printable hidden print:block print:absolute print:top-0 print:left-0 print:w-full print:bg-white print:z-50 p-4 font-mono">
-                    <div className="max-w-[80mm] mx-auto text-black">
-                        <div className="text-center font-bold mb-2">
-                            <div className="text-lg">VEEDRA THE BRAND</div>
-                            <div className="text-base">LOYALTY POINTS SLIP</div>
-                        </div>
-                        <div className="border-b-2 border-dashed border-black my-2"></div>
-
-                        <div className="space-y-1 text-sm">
-                            <div className="flex gap-2">
-                                <span className="font-bold">NAME :</span>
-                                <span>{printWalletData.customerName || printWalletData.name || 'Customer'}</span>
-                            </div>
-                            <div className="flex gap-2">
-                                <span className="font-bold">MOBILE :</span>
-                                <span>{printWalletData.phone}</span>
-                            </div>
-                            <div className="flex gap-2">
-                                <span className="font-bold">DATE :</span>
-                                <span>{new Date().toLocaleString()}</span>
-                            </div>
-                        </div>
-
-                        <div className="border-b-2 border-dashed border-black my-2"></div>
-
-                        <div className="text-center py-4">
-                            <div className="text-3xl font-bold">{Math.floor(printWalletData.points || 0)} POINTS</div>
-                        </div>
-
-                        <div className="border-b-2 border-dashed border-black my-2"></div>
-
-                        <div className="text-center font-bold mt-2 text-sm">
-                            <div>THANK YOU</div>
-                            <div>VISIT AGAIN</div>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

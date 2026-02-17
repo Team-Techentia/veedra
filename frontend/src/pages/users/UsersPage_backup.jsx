@@ -24,11 +24,6 @@ const UsersPage = () => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  // New features
-  const [maskMobileNumbers, setMaskMobileNumbers] = useState(false);
-  const [sortBy, setSortBy] = useState(''); // 'earned-desc', 'earned-asc', 'available-desc', 'available-asc'
-  const [rankLimit, setRankLimit] = useState(50); // 10, 20, 50, 100
-
   // Modals
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPointsModal, setShowPointsModal] = useState(false);
@@ -54,17 +49,8 @@ const UsersPage = () => {
 
   useEffect(() => {
     loadCustomers();
-  }, [currentPage, searchTerm, dateFrom, dateTo]);
-
-  useEffect(() => {
     loadTopHolders();
-  }, [rankLimit, dateFrom, dateTo]);
-
-  // Utility function to mask mobile numbers
-  const maskMobile = (phone) => {
-    if (!phone || !maskMobileNumbers) return phone;
-    return 'xxxxxxx' + phone.slice(-3);
-  };
+  }, [currentPage, searchTerm, dateFrom, dateTo]);
 
   const loadCustomers = async () => {
     setLoading(true);
@@ -82,25 +68,12 @@ const UsersPage = () => {
 
   const loadTopHolders = async () => {
     try {
-      const response = await getTopLoyaltyHolders(rankLimit);
+      const response = await getTopLoyaltyHolders(50);
       setTopHolders(response.data || []);
     } catch (error) {
       console.error('Error loading top holders:', error);
     }
   };
-
-  // Sorted customers based on sortBy state
-  const sortedCustomers = React.useMemo(() => {
-    if (!sortBy) return customers;
-
-    return [...customers].sort((a, b) => {
-      if (sortBy === 'earned-desc') return (b.loyaltyStats?.totalEarned || 0) - (a.loyaltyStats?.totalEarned || 0);
-      if (sortBy === 'earned-asc') return (a.loyaltyStats?.totalEarned || 0) - (b.loyaltyStats?.totalEarned || 0);
-      if (sortBy === 'available-desc') return (b.points || 0) - (a.points || 0);
-      if (sortBy === 'available-asc') return (a.points || 0) - (b.points || 0);
-      return 0;
-    });
-  }, [customers, sortBy]);
 
   const handleEdit = (customer) => {
     setSelectedCustomer(customer);
@@ -253,36 +226,6 @@ const UsersPage = () => {
         <CardHeader>
           <CardTitle>All Customers ({customers.length})</CardTitle>
         </CardHeader>
-        <CardContent>
-          {/* Sorting and Masking Controls */}
-          <div className="flex flex-wrap gap-3 mb-4 items-center">
-            <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">No Sorting</option>
-                <option value="earned-desc">Total Earned: High to Low</option>
-                <option value="earned-asc">Total Earned: Low to High</option>
-                <option value="available-desc">Available Points: High to Low</option>
-                <option value="available-asc">Available Points: Low to High</option>
-              </select>
-            </div>
-            <div className="pt-6">
-              <button
-                onClick={() => setMaskMobileNumbers(!maskMobileNumbers)}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${maskMobileNumbers
-                  ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-              >
-                {maskMobileNumbers ? '🔒 Unhide' : '👁️ Hide'} Mobile Numbers
-              </button>
-            </div>
-          </div>
-        </CardContent>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -294,16 +237,14 @@ const UsersPage = () => {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Place</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">DOB</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Joined</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Earned</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Used</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Expired</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Available</th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {sortedCustomers.map((customer, index) => (
+                {customers.map((customer, index) => (
                   <tr key={customer._id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm text-gray-900">
                       {(currentPage - 1) * 30 + index + 1}
@@ -312,7 +253,7 @@ const UsersPage = () => {
                       {customer.customerName}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-900">
-                      {maskMobile(customer.phone)}
+                      {customer.phone}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {customer.place || '-'}
@@ -323,17 +264,11 @@ const UsersPage = () => {
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {customer.email || '-'}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {formatDate(customer.createdAt)}
-                    </td>
                     <td className="px-4 py-3 text-sm text-right text-green-600 font-medium">
                       {customer.loyaltyStats?.totalEarned || 0}
                     </td>
                     <td className="px-4 py-3 text-sm text-right text-red-600 font-medium">
                       {customer.loyaltyStats?.totalUsed || 0}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-orange-600 font-medium">
-                      {customer.loyaltyStats?.totalExpired || 0}
                     </td>
                     <td className="px-4 py-3 text-sm text-right text-blue-600 font-bold">
                       {customer.points || 0}
@@ -403,110 +338,58 @@ const UsersPage = () => {
         </CardContent>
       </Card>
 
-      {/* Top 50 Loyalty Table */}
-      <div className="max-w-2xl mx-auto">
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex-1">
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-yellow-600" />
-                  {(dateFrom || dateTo) ? (
-                    <span>
-                      Top {rankLimit} Loyalty Points Holders from {dateFrom ? new Date(dateFrom).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'beginning'} to {dateTo ? new Date(dateTo).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'now'}
-                    </span>
-                  ) : (
-                    <span>Top {rankLimit} Loyalty Points Holders</span>
-                  )}
-                </CardTitle>
-              </div>
-              <div className="flex gap-2 items-end">
-                {/* From Date */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">From Date</label>
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
-                  />
-                </div>
-                {/* To Date */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">To Date</label>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
-                  />
-                </div>
-                {/* Rank Filter */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Rank Filter</label>
-                  <select
-                    value={rankLimit}
-                    onChange={(e) => setRankLimit(Number(e.target.value))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+      {/* Top 50 Loyalty Holders */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-yellow-600" />
+            Top 50 Loyalty Points Holders
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-yellow-50 border-b border-yellow-200">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rank</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mobile</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Place</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Available Points</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {topHolders.map((holder, index) => (
+                  <tr
+                    key={holder._id}
+                    className={`hover:bg-gray-50 ${index < 10 ? 'bg-green-50' : ''}`}
                   >
-                    <option value={10}>Top 10</option>
-                    <option value={20}>Top 20</option>
-                    <option value={50}>Top 50</option>
-                    <option value={100}>Top 100</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-yellow-50 border-b border-yellow-200">
-                  <tr>
-                    <th className="px-2 py-1 text-left text-xs font-medium text-gray-500 uppercase">Rank</th>
-                    <th className="px-3 py-1 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-3 py-1 text-left text-xs font-medium text-gray-500 uppercase">Mobile</th>
-                    <th className="px-3 py-1 text-left text-xs font-medium text-gray-500 uppercase">Place</th>
-                    <th className="px-3 py-1 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                    <th className="px-3 py-1 text-right text-xs font-medium text-gray-500 uppercase">Points</th>
+                    <td className="px-4 py-3 text-sm font-bold text-gray-900">
+                      {index < 3 ? (
+                        <span className="text-yellow-600">🏆 #{index + 1}</span>
+                      ) : (
+                        <span>#{index + 1}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                      {holder.customerName}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      {holder.phone}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {holder.place || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-right font-bold text-blue-600">
+                      {holder.points} pts
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {topHolders.map((holder, index) => (
-                    <tr
-                      key={holder._id}
-                      className={`hover:bg-gray-50 ${index < 10 ? 'bg-green-50' : ''}`}
-                    >
-                      <td className="px-2 py-1 text-sm font-bold text-gray-900">
-                        {index < 3 ? (
-                          <span className="text-yellow-600">🏆 #{index + 1}</span>
-                        ) : (
-                          <span>#{index + 1}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-1 text-sm font-medium text-gray-900">
-                        {holder.customerName}
-                      </td>
-                      <td className="px-3 py-1 text-sm text-gray-900">
-                        {maskMobile(holder.phone)}
-                      </td>
-                      <td className="px-3 py-1 text-sm text-gray-600">
-                        {holder.place || '-'}
-                      </td>
-                      <td className="px-3 py-1 text-sm text-gray-600">
-                        {holder.email || '-'}
-                      </td>
-                      <td className="px-3 py-1 text-sm text-right font-bold text-blue-600">
-                        {holder.points} pts
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Edit Customer Modal */}
       {showEditModal && (

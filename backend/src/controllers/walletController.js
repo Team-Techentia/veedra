@@ -182,12 +182,18 @@ const updateWalletPoints = asyncHandler(async (req, res) => {
   // Update points based on type
   if (type === 'earned' || type === 'adjustment') {
     wallet.points += points;
+    // Update loyalty stats for earned points
+    if (type === 'earned') {
+      wallet.loyaltyStats.totalEarned = (wallet.loyaltyStats.totalEarned || 0) + points;
+    }
   } else if (type === 'redeemed') {
     if (wallet.points < points) {
       res.status(400);
       throw new Error('Insufficient points balance');
     }
     wallet.points -= points;
+    // Update loyalty stats for redeemed points
+    wallet.loyaltyStats.totalUsed = (wallet.loyaltyStats.totalUsed || 0) + points;
   }
 
   // Add transaction record
@@ -215,9 +221,304 @@ const updateWalletPoints = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Get all customers with pagination and search
+// @route   GET /api/wallets/customers
+// @access  Private
+const getAllCustomers = asyncHandler(async (req, res) => {
+  const { page = 1, limit = 30, search = '', dateFrom, dateTo } = req.query;
+
+  const query = {};
+
+  // Search across multiple fields
+  if (search) {
+    query.$or = [
+      { customerName: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { place: { $regex: search, $options: 'i' } }
+    ];
+  }
+
+  // Date range filter
+  if (dateFrom || dateTo) {
+    query.createdAt = {};
+    if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
+    if (dateTo) query.createdAt.$lte = new Date(dateTo);
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [customers, total] = await Promise.all([
+    Wallet.find(query)
+      .sort({ points: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean(),
+    Wallet.countDocuments(query)
+  ]);
+
+  res.status(200).json({
+    success: true,
+    data: customers,
+    pagination: {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  });
+});
+
+// @desc    Update customer details
+// @route   PUT /api/wallets/:id
+// @access  Private
+const updateCustomer = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { customerName, place, dateOfBirth, email } = req.body;
+
+  const wallet = await Wallet.findById(id);
+
+  if (!wallet) {
+    res.status(404);
+    throw new Error('Customer not found');
+  }
+
+  // Update fields
+  if (customerName) wallet.customerName = customerName;
+  if (place !== undefined) wallet.place = place;
+  if (dateOfBirth !== undefined) wallet.dateOfBirth = dateOfBirth;
+  if (email !== undefined) wallet.email = email;
+
+  await wallet.save();
+
+  res.status(200).json({
+    success: true,
+    data: wallet
+  });
+});
+
+// @desc    Delete customer
+// @route   DELETE /api/wallets/:id
+// @access  Private
+const deleteCustomer = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const wallet = await Wallet.findByIdAndDelete(id);
+
+  if (!wallet) {
+    res.status(404);
+    throw new Error('Customer not found');
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Customer deleted successfully'
+  });
+});
+
+// @desc    Get top loyalty holders
+// @route   GET /api/wallets/top-loyalty
+// @access  Private
+const getTopLoyaltyHolders = asyncHandler(async (req, res) => {
+  const { limit = 50 } = req.query;
+
+  const topHolders = await Wallet.getTopLoyaltyHolders(parseInt(limit));
+
+  res.status(200).json({
+    success: true,
+    data: topHolders
+  });
+});
+
+// @desc    Get customer bills
+// @route   GET /api/wallets/:id/bills
+// @access  Private
+const getCustomerBills = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { dateFrom, dateTo } = req.query;
+
+  const wallet = await Wallet.findById(id);
+
+  if (!wallet) {
+    res.status(404);
+    throw new Error('Customer not found');
+  }
+
+  const query = { 'customer.phone': wallet.phone };
+
+  // Date range filter
+  if (dateFrom || dateTo) {
+    query.createdAt = {};
+    if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
+    if (dateTo) query.createdAt.$lte = new Date(dateTo);
+  }
+
+  const bills = await Billing.find(query)
+    .sort({ createdAt: -1 })
+    .select('billNumber total createdAt loyalty')
+    .lean();
+
+  res.status(200).json({
+    success: true,
+    data: bills
+  });
+});
+
+// @desc    Manually adjust customer points
+// @route   POST /api/wallets/:id/adjust-points
+// @access  Private
+const adjustPoints = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { points, reason } = req.body;
+
+  if (!points || points === 0) {
+    res.status(400);
+    throw new Error('Valid points amount is required');
+  }
+
+  const wallet = await Wallet.findById(id);
+
+  if (!wallet) {
+    res.status(404);
+    throw new Error('Customer not found');
+  }
+
+  const type = points > 0 ? 'adjustment' : 'adjustment';
+  const adjustedPoints = Math.abs(points);
+
+  // Update points
+  wallet.points = Math.max(0, wallet.points + points);
+
+  // Update stats
+  if (points > 0) {
+    wallet.loyaltyStats.totalEarned = (wallet.loyaltyStats.totalEarned || 0) + adjustedPoints;
+  } else {
+    wallet.loyaltyStats.totalUsed = (wallet.loyaltyStats.totalUsed || 0) + adjustedPoints;
+  }
+
+  // Add transaction
+  wallet.transactions.push({
+    type,
+    points: adjustedPoints,
+    description: reason || (points > 0 ? 'Manual points addition' : 'Manual points deduction'),
+    date: new Date()
+  });
+
+  await wallet.save();
+
+  console.log(`🔧 Manual adjustment - Customer: ${wallet.customerName}, Points: ${points > 0 ? '+' : ''}${points}`);
+
+  res.status(200).json({
+    success: true,
+    data: wallet
+  });
+});
+
+// @desc    Expire old points (background job)
+// @route   POST /api/wallets/expire-old-points
+// @access  Private
+const expireOldPoints = asyncHandler(async (req, res) => {
+  const result = await Wallet.expireOldPoints();
+
+  res.status(200).json({
+    success: true,
+    data: result
+  });
+});
+
+// @desc    Get all point rules
+// @route   GET /api/wallets/rules
+// @access  Private
+const getPointRules = asyncHandler(async (req, res) => {
+  const rules = await PointRule.find().sort({ minAmount: 1 });
+  res.status(200).json({
+    success: true,
+    data: rules
+  });
+});
+
+// @desc    Add a point rule
+// @route   POST /api/wallets/rules
+// @access  Private
+const addPointRule = asyncHandler(async (req, res) => {
+  const { minAmount, maxAmount, points } = req.body;
+
+  if (minAmount === undefined || maxAmount === undefined || points === undefined) {
+    res.status(400);
+    throw new Error('Please provide minAmount, maxAmount, and points');
+  }
+
+  const rule = await PointRule.create({
+    minAmount,
+    maxAmount,
+    points
+  });
+
+  res.status(201).json({
+    success: true,
+    data: rule
+  });
+});
+
+// @desc    Update a point rule
+// @route   PUT /api/wallets/rules/:id
+// @access  Private
+const updatePointRule = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { minAmount, maxAmount, points } = req.body;
+
+  const rule = await PointRule.findById(id);
+
+  if (!rule) {
+    res.status(404);
+    throw new Error('Rule not found');
+  }
+
+  rule.minAmount = minAmount !== undefined ? minAmount : rule.minAmount;
+  rule.maxAmount = maxAmount !== undefined ? maxAmount : rule.maxAmount;
+  rule.points = points !== undefined ? points : rule.points;
+
+  await rule.save();
+
+  res.status(200).json({
+    success: true,
+    data: rule
+  });
+});
+
+// @desc    Delete a point rule
+// @route   DELETE /api/wallets/rules/:id
+// @access  Private
+const deletePointRule = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const rule = await PointRule.findByIdAndDelete(id);
+
+  if (!rule) {
+    res.status(404);
+    throw new Error('Rule not found');
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Rule removed'
+  });
+});
+
 module.exports = {
   getWalletByPhone,
   calculatePointsEarned,
   calculatePointsPerProduct,
-  updateWalletPoints
+  updateWalletPoints,
+  getAllCustomers,
+  updateCustomer,
+  deleteCustomer,
+  getTopLoyaltyHolders,
+  getCustomerBills,
+  adjustPoints,
+  expireOldPoints,
+  // Point Rule Management
+  getPointRules,
+  addPointRule,
+  updatePointRule,
+  deletePointRule
 };

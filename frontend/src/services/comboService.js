@@ -31,15 +31,21 @@ const comboService = {
     return response.data
   },
 
-  // Toggle combo status
+  // Toggle combo active/pause status
   toggleComboStatus: async (id) => {
-    const response = await api.put(`/combos/${id}/toggle-status`)
+    const response = await api.patch(`/combos/${id}/toggle`)
     return response.data
   },
 
   // Validate combo slot
   validateComboSlot: async (slotData) => {
     const response = await api.post('/combos/validate-slot', slotData)
+    return response.data
+  },
+
+  // Create quantity slab combo
+  createQuantitySlabCombo: async (comboData) => {
+    const response = await api.post('/combos/quantity-slab', comboData)
     return response.data
   }
 }

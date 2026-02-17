@@ -8,7 +8,9 @@ const {
   deleteCombo,
   getActiveCombos,
   validateComboForProducts,
-  getComboStats
+  getComboStats,
+  createQuantitySlabCombo,
+  toggleComboStatus
 } = require('../controllers/comboController');
 
 const router = express.Router();
@@ -25,7 +27,9 @@ router.post('/validate', canAccessBilling, validateComboForProducts);
 
 // Manager/Owner only routes
 router.post('/', isManagerOrOwner, createCombo);
+router.post('/quantity-slab', isManagerOrOwner, createQuantitySlabCombo);
 router.put('/:id', isManagerOrOwner, updateCombo);
+router.patch('/:id/toggle', isManagerOrOwner, toggleComboStatus);
 router.delete('/:id', isManagerOrOwner, deleteCombo);
 
 module.exports = router;

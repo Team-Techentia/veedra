@@ -131,6 +131,101 @@ const POSBillingPage = () => {
     }
   }, [cart, nextCartItemId]);
 
+  // 🎯 AUTO-APPLY QUANTITY SLAB COMBOS
+  useEffect(() => {
+    const applyAutoCombos = async () => {
+      if (cart.length === 0) return;
+
+      try {
+        // Fetch active auto-combos
+        const response = await comboService.getCombos();
+        const combosData = response.data || response;
+        const autoCombos = Array.isArray(combosData)
+          ? combosData.filter(combo => combo.comboType === 'quantity_slab')
+          : [];
+
+        if (autoCombos.length === 0) return;
+
+        // Group cart items by offer price
+        const priceGroups = {};
+        cart.forEach(item => {
+          const offerPrice = item.pricing?.offerPrice || item.price || 0;
+          if (!priceGroups[offerPrice]) {
+            priceGroups[offerPrice] = {
+              items: [],
+              totalQuantity: 0
+            };
+          }
+          priceGroups[offerPrice].items.push(item);
+          priceGroups[offerPrice].totalQuantity += item.quantity || 1;
+        });
+
+        // Apply matching combos
+        let cartUpdated = false;
+        const updatedCart = [...cart];
+
+        for (const [priceKey, priceGroup] of Object.entries(priceGroups)) {
+          const offerPrice = parseFloat(priceKey);
+          const totalQty = priceGroup.totalQuantity;
+
+          // Find matching combo for this price range
+          const matchingCombo = autoCombos.find(combo => {
+            const { minPrice, maxPrice } = combo.quantitySlabConfig;
+            return offerPrice >= minPrice && offerPrice <= maxPrice;
+          });
+
+          if (matchingCombo) {
+            const slabs = matchingCombo.quantitySlabConfig.slabs || [];
+
+            // Find applicable slab
+            let applicableSlab = null;
+            for (const slab of slabs) {
+              if (totalQty >= slab.minQuantity) {
+                applicableSlab = slab;
+              }
+            }
+
+            if (applicableSlab) {
+              const slabPrice = applicableSlab.slabPrice;
+
+              // Apply slab price to all items in this price group
+              priceGroup.items.forEach(item => {
+                const cartIndex = updatedCart.findIndex(ci => ci.cartItemId === item.cartItemId);
+                if (cartIndex !== -1) {
+                  const currentPrice = updatedCart[cartIndex].price;
+                  if (currentPrice !== slabPrice) {
+                    updatedCart[cartIndex] = {
+                      ...updatedCart[cartIndex],
+                      price: slabPrice,
+                      originalPrice: offerPrice,
+                      autoComboApplied: {
+                        comboId: matchingCombo._id,
+                        comboName: matchingCombo.name,
+                        slabPrice: slabPrice,
+                        savings: offerPrice - slabPrice
+                      }
+                    };
+                    cartUpdated = true;
+                  }
+                }
+              });
+            }
+          }
+        }
+
+        // Update cart if any changes were made
+        if (cartUpdated) {
+          setCart(updatedCart);
+        }
+      } catch (error) {
+        console.error('Error applying auto-combos:', error);
+      }
+    };
+
+    applyAutoCombos();
+  }, [cart.map(item => `${item._id}-${item.quantity}`).join(',')]); // Re-run when items or quantities change
+
+
   // Load QuaggaJS dynamically
   useEffect(() => {
     const loadQuagga = async () => {
@@ -218,9 +313,13 @@ const POSBillingPage = () => {
 
   // Product search and filtering - matches reference
   const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const offerPrice = product.pricing?.offerPrice?.toString() || '';
+
+    const matchesSearch =
+      product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (product.productCode && product.productCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (product.barcode && product.barcode.includes(searchTerm));
+      (product.barcode && product.barcode.includes(searchTerm)) ||
+      offerPrice === searchTerm; // Exact price match
 
     const matchesCategory = !selectedCategory || product.category?._id === selectedCategory;
 
@@ -624,8 +723,8 @@ const POSBillingPage = () => {
       const assignedQty = assignedCartItemQuantities.get(item.cartItemId) || 0;
       const quantityForSingles = Math.max(0, item.quantity - assignedQty);
 
-      // Always use offer price for singles
-      const singlePrice = Number(item.pricing?.offerPrice || item.price || 0);
+      // Use ORIGINAL price (before auto-combo) for subtotal display
+      const singlePrice = Number(item.originalPrice || item.pricing?.offerPrice || item.price || 0);
       singlesTotal += quantityForSingles * singlePrice;
     });
 
@@ -692,7 +791,16 @@ const POSBillingPage = () => {
   };
 
   const calculateGrandTotal = () => {
-    return calculateSinglesSubtotal() + calculateCombosSubtotal();
+    const subtotal = calculateSinglesSubtotal() + calculateCombosSubtotal();
+
+    // Calculate auto-combo discount
+    const autoComboItems = cart.filter(item => item.autoComboApplied);
+    const autoComboDiscount = autoComboItems.reduce((sum, item) => {
+      const savings = (item.autoComboApplied.savings || 0) * (item.quantity || 1);
+      return sum + savings;
+    }, 0);
+
+    return subtotal - autoComboDiscount;
   };
 
   // Wallet functions
@@ -826,10 +934,16 @@ const POSBillingPage = () => {
   };
 
   const togglePointRedemption = () => {
-    if (!walletData || walletData.points <= 0) {
-      toast.error('No points available to redeem');
+    if (!walletData) {
+      toast.error('No wallet data available');
       return;
     }
+
+    if (walletData.points < 2000) {
+      toast.error('Minimum 2000 points required to redeem');
+      return;
+    }
+
     setPointsApplied(!pointsApplied);
     toast.success(pointsApplied ? 'Points removed' : 'Points applied!');
   };
@@ -2069,6 +2183,40 @@ const POSBillingPage = () => {
                   <span className="text-gray-600">Singles Subtotal:</span>
                   <span className="font-medium">{fmt(calculateSinglesSubtotal())}</span>
                 </div>
+
+                {/* Auto-Combo Discount */}
+                {(() => {
+                  const autoComboItems = cart.filter(item => item.autoComboApplied);
+                  if (autoComboItems.length > 0) {
+                    const totalSavings = autoComboItems.reduce((sum, item) => {
+                      const savings = (item.autoComboApplied.savings || 0) * (item.quantity || 1);
+                      return sum + savings;
+                    }, 0);
+
+                    // Get unique combo names
+                    const comboNames = [...new Set(autoComboItems.map(item => item.autoComboApplied.comboName))];
+
+                    return (
+                      <div className="bg-green-50 px-3 py-2 rounded-lg mb-1 border border-green-200">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <span className="text-green-700 font-semibold text-sm">
+                              ✨ Auto-Combo Discount
+                            </span>
+                            <span className="text-xs text-green-600">
+                              ({comboNames.join(', ')})
+                            </span>
+                          </div>
+                          <div className="text-green-700 font-bold text-base">
+                            -{fmt(totalSavings)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Combos Total:</span>
                   <span className="font-medium">{fmt(calculateCombosSubtotal())}</span>
@@ -2076,15 +2224,17 @@ const POSBillingPage = () => {
 
                 {/* GST Breakdown */}
                 {(() => {
-                  const grandTotal = calculateGrandTotal();
-                  if (grandTotal > 0) {
+                  // Use ORIGINAL subtotal (before auto-combo discount) for GST calculation
+                  const originalSubtotal = calculateSinglesSubtotal() + calculateCombosSubtotal();
+
+                  if (originalSubtotal > 0) {
                     const allItems = [
-                      ...cart.map(item => ({ price: item.price, quantity: item.quantity })),
+                      ...cart.map(item => ({ price: item.originalPrice || item.pricing?.offerPrice || item.price, quantity: item.quantity })),
                       ...selectedCombos.flatMap(combo =>
                         (combo.items || []).map(item => ({ price: item.offerPrice || item.price, quantity: item.quantity }))
                       )
                     ];
-                    const gstBreakdown = calculateGSTBreakdown(grandTotal, allItems);
+                    const gstBreakdown = calculateGSTBreakdown(originalSubtotal, allItems);
 
                     return (
                       <div className="border-t border-gray-200 pt-2 mt-3 space-y-1">

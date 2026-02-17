@@ -58,7 +58,7 @@ const getCombo = async (req, res) => {
 // Create combo
 const createCombo = async (req, res) => {
   try {
-    const comboData = { 
+    const comboData = {
       ...req.body,
       createdAt: new Date()
     };
@@ -78,7 +78,7 @@ const createCombo = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating combo:', error);
-    
+
     // Handle validation errors
     if (error.name === 'ValidationError') {
       const validationErrors = Object.values(error.errors).map(err => err.message);
@@ -139,7 +139,7 @@ const updateCombo = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating combo:', error);
-    
+
     // Handle validation errors
     if (error.name === 'ValidationError') {
       const validationErrors = Object.values(error.errors).map(err => err.message);
@@ -280,7 +280,7 @@ const getComboStats = async (req, res) => {
     const totalCombos = await Combo.countDocuments();
     const activeCombos = await Combo.countDocuments({ paused: false });
     const pausedCombos = await Combo.countDocuments({ paused: true });
-    
+
     const stats = {
       totalCombos,
       activeCombos,
@@ -289,7 +289,7 @@ const getComboStats = async (req, res) => {
       totalSavings: 0, // Would need to calculate from billing data
       avgOrderValue: 0 // Would need to calculate from billing data
     };
-    
+
     res.json({
       success: true,
       data: stats
@@ -304,6 +304,145 @@ const getComboStats = async (req, res) => {
   }
 };
 
+// Create Quantity Slab Combo
+const createQuantitySlabCombo = async (req, res) => {
+  try {
+    const { name, minPrice, maxPrice, slabs, validFrom, validTo, notes } = req.body;
+
+    // Validation
+    if (!name || !minPrice || !maxPrice || !slabs || !Array.isArray(slabs) || slabs.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'name, minPrice, maxPrice, and slabs array are required'
+      });
+    }
+
+    // Validate price range
+    if (parseFloat(minPrice) > parseFloat(maxPrice)) {
+      return res.status(400).json({
+        success: false,
+        message: 'minPrice cannot be greater than maxPrice'
+      });
+    }
+
+    // Validate slabs
+    for (let i = 0; i < slabs.length; i++) {
+      const slab = slabs[i];
+
+      if (!slab.minQuantity || !slab.slabPrice) {
+        return res.status(400).json({
+          success: false,
+          message: `Slab ${i + 1}: minQuantity and slabPrice are required`
+        });
+      }
+
+      // Ensure slabs are in ascending order by quantity
+      if (i > 0 && slab.minQuantity <= slabs[i - 1].minQuantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Slab ${i + 1}: minQuantity must be greater than previous slab's minQuantity`
+        });
+      }
+
+      // Warn if prices increase as quantity increases
+      if (i > 0 && slab.slabPrice > slabs[i - 1].slabPrice) {
+        console.warn(`⚠️ Warning: Slab ${i + 1} price is higher than previous slab`);
+      }
+    }
+
+    const comboData = {
+      name,
+      type: 'custom',
+      comboType: 'quantity_slab',
+      offerPrice: slabs[0].slabPrice, // First slab price
+      qtyProducts: 999, // Unlimited
+      notes: notes || `Auto-apply quantity-based pricing for ₹${minPrice}-₹${maxPrice} products`,
+      quantitySlabConfig: {
+        enabled: true,
+        minPrice: parseFloat(minPrice),
+        maxPrice: parseFloat(maxPrice),
+        slabs,
+        applyLastSlabForHigher: true,
+        autoApply: true
+      },
+      colorTag: 'Blue',
+      paused: false
+    };
+
+    // Add validity dates if provided
+    if (validFrom) comboData.validFrom = new Date(validFrom);
+    if (validTo) comboData.validTo = new Date(validTo);
+
+    const combo = await Combo.create(comboData);
+
+    console.log(`✅ Quantity slab combo created: "${name}" for ₹${minPrice}-₹${maxPrice} products with ${slabs.length} slabs`);
+
+    res.status(201).json({
+      success: true,
+      data: combo,
+      message: 'Quantity slab combo created successfully'
+    });
+  } catch (error) {
+    console.error('Error creating quantity slab combo:', error);
+
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create quantity slab combo',
+      error: error.message
+    });
+  }
+};
+
+// Toggle combo active status
+const toggleComboStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid combo ID'
+      });
+    }
+
+    const combo = await Combo.findById(id);
+
+    if (!combo) {
+      return res.status(404).json({
+        success: false,
+        message: 'Combo not found'
+      });
+    }
+
+    // Toggle isActive status
+    combo.isActive = !combo.isActive;
+    await combo.save();
+
+    res.json({
+      success: true,
+      data: combo,
+      message: `Combo ${combo.isActive ? 'activated' : 'paused'} successfully`
+    });
+  } catch (error) {
+    console.error('Error toggling combo status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to toggle combo status',
+      error: error.message
+    });
+  }
+};
+
+
 module.exports = {
   getCombos,
   getCombo,
@@ -312,5 +451,7 @@ module.exports = {
   deleteCombo,
   getActiveCombos,
   validateComboForProducts,
-  getComboStats
+  getComboStats,
+  createQuantitySlabCombo,
+  toggleComboStatus
 };

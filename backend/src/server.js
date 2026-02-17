@@ -144,21 +144,43 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });
 
-// Handle unhandled promise rejections
+// Handle unhandled promise rejections - LOG but DON'T CRASH
 process.on('unhandledRejection', (err, promise) => {
-  console.log(`Error: ${err.message}`);
-  // Close server & exit process
-  server.close(() => {
-    process.exit(1);
-  });
+  console.error('❌ UNHANDLED PROMISE REJECTION:');
+  console.error('Error:', err.message);
+  console.error('Stack:', err.stack);
+  console.error('Promise:', promise);
+  console.log('⚠️  Server continuing to run. Please fix the above error.');
+  // DO NOT EXIT - Let the server continue running
+  // In production, you might want to send this to an error tracking service
 });
 
-// Handle SIGTERM
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('❌ UNCAUGHT EXCEPTION:');
+  console.error('Error:', err.message);
+  console.error('Stack:', err.stack);
+  console.log('⚠️  Server continuing to run. Please fix the above error.');
+  // DO NOT EXIT - Let the server continue running
+});
+
+// Handle SIGTERM (graceful shutdown)
 process.on('SIGTERM', () => {
   console.log('👋 SIGTERM received');
   console.log('✋ Shutting down gracefully');
   server.close(() => {
     console.log('💥 Process terminated');
+    process.exit(0);
+  });
+});
+
+// Handle SIGINT (Ctrl+C)
+process.on('SIGINT', () => {
+  console.log('\n👋 SIGINT received (Ctrl+C)');
+  console.log('✋ Shutting down gracefully');
+  server.close(() => {
+    console.log('💥 Process terminated');
+    process.exit(0);
   });
 });
 

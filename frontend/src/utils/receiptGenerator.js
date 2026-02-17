@@ -199,11 +199,11 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
           </div>
           <div class="flex-between">
             <span class="bold">Date:</span>
-            <span>${new Date(bill.date || bill.createdAt).toLocaleDateString()}</span>
+            <span>${new Date(bill.date || bill.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')}</span>
           </div>
           <div class="flex-between">
             <span class="bold">Time:</span>
-            <span class="bold">${new Date(bill.date || bill.createdAt).toLocaleTimeString()}</span>
+            <span class="bold">${new Date(bill.date || bill.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true })}</span>
           </div>
         </div>
         
@@ -336,8 +336,28 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span class="bold">Total MRP:</span>
                 <span class="bold">${fmt(totalMRP)}</span>
               </div>
+              ${(() => {
+          // Check for auto-combo discounts
+          const autoComboItems = allItems.filter(item => (item.comboAssignment && item.comboAssignment.isAutoApplied) || item.autoComboApplied);
+          if (autoComboItems.length > 0) {
+            const autoComboSavings = autoComboItems.reduce((sum, item) => {
+              const savings = ((item.comboAssignment && item.comboAssignment.savings) || (item.autoComboApplied && item.autoComboApplied.savings) || 0) * (item.quantity || 1);
+              return sum + savings;
+            }, 0);
+
+            const comboNames = [...new Set(autoComboItems.map(item => (item.comboAssignment && item.comboAssignment.comboName) || (item.autoComboApplied && item.autoComboApplied.comboName)))];
+
+            return `
+                    <div class="flex-between" style="color: #000000; margin: 1mm 0;">
+                      <span>Bulk purchase discount:</span>
+                      <span class="bold">-${fmt(autoComboSavings)}</span>
+                   </div>
+                  `;
+          }
+          return '';
+        })()}
               <div class="flex-between" style="color: #000000;">
-                <span>Discount:</span>
+                <span>Today's Discount:</span>
                 <span class="bold">- ${fmt(actualDiscount)}</span>
               </div>
               <div class="solid-divider"></div>
@@ -346,19 +366,6 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
                 <span class="bold" style="font-size: 22px;">${fmt(bill.total !== undefined ? bill.total : (totalMRP - actualDiscount))}</span>
               </div>
               
-              ${(bill.loyalty) ? `
-              <div class="divider"></div>
-              <div style="font-size: 11px;">
-                <div class="flex-between">
-                  <span>Used Points:</span>
-                  <span class="bold">${bill.loyalty.redeemedPoints || 0}</span>
-                </div>
-                <div class="flex-between">
-                  <span>Points Price:</span>
-                  <span class="bold">${fmt(bill.loyalty.pointValue || 0)}</span>
-                </div>
-              </div>
-              ` : ''}
               <div class="divider"></div>
               <div class="flex-between">
                 <span class="bold">Given Amount:</span>
@@ -404,31 +411,46 @@ const generateReceiptHTML = (bill, autoPrint = false) => {
         
         <div class="divider"></div>
         
-        <div style="font-size: 12px;">
+        <div style="font-size: 12px; margin-top: 3mm; margin-bottom: 3mm;">
           <div class="flex-between">
-            <span class="bold">Payment:</span>
-            <span>${(bill.paymentMethod || 'cash').toUpperCase()}</span>
+            <span class="bold">PAYMENT MODE:</span>
+            <span class="bold" style="font-size: 14px; border: 1px solid #000; padding: 1px 4px;">${(bill.paymentMethod || 'cash').toUpperCase()}</span>
           </div>
-          
+        
           ${(bill.loyalty) ? `
-          <div class="flex-between" style="margin-top: 2mm;">
-             <span>My available Points :</span>
-             <span class="bold">${bill.loyalty.totalPoints || 0}</span>
-          </div>
-          <div class="flex-between">
-             <span>Points From this bill :</span>
-             <span class="bold" style="font-size: 10px;">
-               ${(() => {
+          <div style="margin-top: 4mm;">
+            <div class="center bold small" style="border-bottom: 1px dashed #000; padding-bottom: 1mm; margin-bottom: 1mm;">LOYALTY POINTS DETAILS</div>
+            ${bill.loyalty.redeemedPoints > 0 ? `
+            <div class="flex-between">
+               <span>Used Points:</span>
+               <span class="bold">${bill.loyalty.redeemedPoints}</span>
+            </div>
+            <div class="flex-between">
+               <span>Points Value:</span>
+               <span class="bold">-${fmt(bill.loyalty.pointValue || 0)}</span>
+            </div>
+            <div style="margin: 1mm 0; border-top: 1px dotted #ccc;"></div>
+            ` : ''}
+            
+            <div class="flex-between">
+               <span>Available Points:</span>
+               <span class="bold">${bill.loyalty.totalPoints || 0}</span>
+            </div>
+            <div class="flex-between">
+               <span>Earned from Bill:</span>
+               <span class="bold" style="font-size: 10px;">
+                 ${(() => {
         if (bill.pointsBreakdown && bill.pointsBreakdown.length > 0) {
           const breakdownString = bill.pointsBreakdown
             .map(p => `${p.points}`)
             .join(' + ');
           const total = bill.loyalty.pointsEarned || 0;
-          return `${breakdownString} = ${total}`;
+          return `${breakdownString} = +${total}`;
         }
-        return bill.loyalty.pointsEarned || 0;
+        return `+${bill.loyalty.pointsEarned || 0}`;
       })()}
-             </span>
+               </span>
+            </div>
           </div>
           ` : ''}
         </div>
