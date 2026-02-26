@@ -50,9 +50,12 @@ export const deleteCustomer = async (id) => {
 };
 
 // Get top loyalty holders
-export const getTopLoyaltyHolders = async (limit = 50) => {
+export const getTopLoyaltyHolders = async (limit = 50, dateFrom = null, dateTo = null) => {
     try {
-        const response = await api.get('/wallets/top-loyalty', { params: { limit } });
+        const params = { limit };
+        if (dateFrom) params.dateFrom = dateFrom;
+        if (dateTo) params.dateTo = dateTo;
+        const response = await api.get('/wallets/top-loyalty', { params });
         return response;
     } catch (error) {
         console.error('Error fetching top loyalty holders:', error);

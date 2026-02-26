@@ -12,6 +12,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    historyApiFallback: true,  // Fix: SPA routes work on browser refresh
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
@@ -20,8 +21,13 @@ export default defineConfig({
       }
     }
   },
+  preview: {
+    port: 4173,
+    historyApiFallback: true,  // Fix: applies to vite preview too
+  },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: false,          // Disable sourcemaps in prod — reduces bundle size
+    chunkSizeWarningLimit: 1000,
   }
 })

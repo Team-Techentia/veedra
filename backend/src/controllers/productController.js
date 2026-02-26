@@ -7,15 +7,15 @@ const { generateProductCode, generateChildCode } = require('../services/productC
 // @access  Private
 const getProducts = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, category, vendor, search } = req.query;
-  
+
   let query = { isActive: true };
-  
+
   if (category) query.category = category;
   if (vendor) query.vendor = vendor;
   if (search) {
     query.$text = { $search: search };
   }
-  
+
   // Get all products without pagination to ensure parent-child integrity
   const allProducts = await Product.find(query)
     .populate('category', 'name')
@@ -23,33 +23,32 @@ const getProducts = asyncHandler(async (req, res) => {
     .populate('vendor', 'name')
     .select('+specifications.size +specifications.color')
     .sort({ createdAt: -1 });
-  
+
   // Separate parents and children
   const parents = allProducts.filter(p => p.type === 'parent' || p.type === 'standalone');
   const children = allProducts.filter(p => p.type === 'child');
-  
+
   // Get parent IDs that have children
-  const childParentIds = new Set(children.map(c => c.parentProduct?.toString()).filter(Boolean));
-  
-  // Ensure all parent products with children are included
-  const missingParents = [];
-  for (const parentId of childParentIds) {
-    if (!parents.find(p => p._id.toString() === parentId)) {
-      const parent = await Product.findById(parentId)
-        .populate('category', 'name')
-        .populate('subcategory', 'name')
-        .populate('vendor', 'name');
-      if (parent) {
-        missingParents.push(parent);
-      }
-    }
+  const childParentIds = [...new Set(children.map(c => c.parentProduct?.toString()).filter(Boolean))];
+
+  // Find which parents are missing from the current list
+  const existingParentIds = new Set(parents.map(p => p._id.toString()));
+  const missingParentIds = childParentIds.filter(id => !existingParentIds.has(id));
+
+  // Fetch all missing parents in one batch query
+  let missingParents = [];
+  if (missingParentIds.length > 0) {
+    missingParents = await Product.find({ _id: { $in: missingParentIds } })
+      .populate('category', 'name')
+      .populate('subcategory', 'name')
+      .populate('vendor', 'name');
   }
-  
+
   // Combine all products ensuring parent-child integrity
   const products = [...parents, ...children, ...missingParents];
-  
+
   const total = await Product.countDocuments(query);
-  
+
   res.json({
     status: 'success',
     data: products,
@@ -71,12 +70,12 @@ const getProduct = asyncHandler(async (req, res) => {
     .populate('subcategory')
     .populate('vendor')
     .populate('childProducts');
-  
+
   if (!product) {
     res.status(404);
     throw new Error('Product not found');
   }
-  
+
   res.json({
     status: 'success',
     data: product
@@ -92,12 +91,12 @@ const createProduct = asyncHandler(async (req, res) => {
       ...req.body,
       createdBy: req.user.id
     };
-    
+
     // Handle empty subcategory field
     if (productData.subcategory === '' || productData.subcategory === null) {
       delete productData.subcategory;
     }
-    
+
     // For bundles, set bundleSize based on total inventory
     if (productData.bundle?.isBundle) {
       // Ensure we have at least 2 items for a bundle (1 parent + 1 child minimum)
@@ -110,15 +109,15 @@ const createProduct = asyncHandler(async (req, res) => {
       // Bundle size should be total inventory (one parent + rest children)
       productData.bundle.bundleSize = Math.max(2, productData.inventory.currentStock);
     }
-    
+
     // Check if this is a bundle product
     if (productData.bundle?.isBundle) {
       // Create bundle with children
       const bundle = await Product.createBundleWithChildren(productData, req.user.id);
-      
+
       // Get the complete bundle with children
       const bundleSummary = await bundle.getBundleSummary();
-      
+
       res.status(201).json({
         status: 'success',
         data: bundle,
@@ -128,7 +127,7 @@ const createProduct = asyncHandler(async (req, res) => {
     } else {
       // Create regular product
       const product = await Product.create(productData);
-      
+
       res.status(201).json({
         status: 'success',
         data: product
@@ -149,14 +148,14 @@ const createProduct = asyncHandler(async (req, res) => {
 const updateProduct = asyncHandler(async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
       return res.status(404).json({
         status: 'error',
         message: 'Product not found'
       });
     }
-    
+
     const updatedProduct = await Product.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -165,12 +164,12 @@ const updateProduct = asyncHandler(async (req, res) => {
         runValidators: true
       }
     );
-    
+
     // If this is a parent product, update children if needed
     if (product.type === 'parent' && product.bundle?.isBundle) {
       await product.updateChildProducts(req.body);
     }
-    
+
     res.json({
       status: 'success',
       data: updatedProduct
@@ -189,26 +188,26 @@ const updateProduct = asyncHandler(async (req, res) => {
 // @access  Private/Manager
 const deleteProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
-  
+
   if (!product) {
     res.status(404);
     throw new Error('Product not found');
   }
 
   let deletedCount = 1;
-  
+
   // If deleting a parent product, also delete all child products
   if (product.type === 'parent' && product.bundle?.isBundle) {
     const childProducts = await Product.find({ parentProduct: req.params.id });
     deletedCount += childProducts.length;
-    
+
     // Delete all child products
     await Product.deleteMany({ parentProduct: req.params.id });
   }
-  
+
   // Delete the main product
   await Product.findByIdAndDelete(req.params.id);
-  
+
   res.json({
     status: 'success',
     message: `Product${deletedCount > 1 ? 's' : ''} deleted successfully`,
@@ -222,16 +221,16 @@ const deleteProduct = asyncHandler(async (req, res) => {
 const bulkCreateProducts = asyncHandler(async (req, res) => {
   try {
     const { products, options = {} } = req.body;
-    
+
     if (!products || !Array.isArray(products) || products.length === 0) {
       return res.status(400).json({
         status: 'error',
         message: 'Products array is required'
       });
     }
-    
+
     const results = await Product.bulkCreateProducts(products, req.user.id, options);
-    
+
     res.status(201).json({
       status: 'success',
       data: results,
@@ -251,12 +250,12 @@ const bulkCreateProducts = asyncHandler(async (req, res) => {
 // @access  Private
 const searchProducts = asyncHandler(async (req, res) => {
   const { q } = req.query;
-  
+
   if (!q) {
     res.status(400);
     throw new Error('Search query required');
   }
-  
+
   const products = await Product.find({
     $and: [
       { isActive: true },
@@ -269,7 +268,7 @@ const searchProducts = asyncHandler(async (req, res) => {
       }
     ]
   }).limit(20);
-  
+
   res.json({
     status: 'success',
     data: products
@@ -281,7 +280,7 @@ const searchProducts = asyncHandler(async (req, res) => {
 // @access  Private/Manager
 const getLowStockProducts = asyncHandler(async (req, res) => {
   const products = await Product.getLowStockProducts();
-  
+
   res.json({
     status: 'success',
     data: products
@@ -293,16 +292,16 @@ const getLowStockProducts = asyncHandler(async (req, res) => {
 // @access  Private
 const generateBarcode = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
-  
+
   if (!product) {
     res.status(404);
     throw new Error('Product not found');
   }
-  
+
   try {
     const BarcodeService = require('../services/barcodeService');
     const barcodeData = BarcodeService.generateProductBarcode(product);
-    
+
     res.json({
       status: 'success',
       data: barcodeData
@@ -321,22 +320,22 @@ const generateBarcode = asyncHandler(async (req, res) => {
 // @access  Private
 const generateBundleBarcodes = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
-  
+
   if (!product) {
     res.status(404);
     throw new Error('Product not found');
   }
-  
+
   if (product.type !== 'parent' || !product.bundle?.isBundle) {
     res.status(400);
     throw new Error('Product is not a bundle');
   }
-  
+
   try {
     const childProducts = await Product.find({ parentProduct: req.params.id });
     const BarcodeService = require('../services/barcodeService');
     const bundleBarcodes = BarcodeService.generateBundleBarcodes(product, childProducts);
-    
+
     res.json({
       status: 'success',
       data: {
@@ -360,23 +359,23 @@ const generateBundleBarcodes = asyncHandler(async (req, res) => {
 const getBundleSummary = asyncHandler(async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
       return res.status(404).json({
         status: 'error',
         message: 'Product not found'
       });
     }
-    
+
     if (product.type !== 'parent' || !product.bundle?.isBundle) {
       return res.status(400).json({
         status: 'error',
         message: 'Product is not a bundle'
       });
     }
-    
+
     const bundleSummary = await product.getBundleSummary();
-    
+
     res.json({
       status: 'success',
       data: bundleSummary
@@ -396,23 +395,23 @@ const getBundleSummary = asyncHandler(async (req, res) => {
 const createChildProducts = asyncHandler(async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
       return res.status(404).json({
         status: 'error',
         message: 'Product not found'
       });
     }
-    
+
     if (product.type !== 'parent' || !product.bundle?.isBundle) {
       return res.status(400).json({
         status: 'error',
         message: 'Product is not a bundle'
       });
     }
-    
+
     const childProducts = await product.createChildProducts(req.user.id);
-    
+
     res.status(201).json({
       status: 'success',
       data: childProducts,
@@ -433,9 +432,9 @@ const createChildProducts = asyncHandler(async (req, res) => {
 const getBundles = asyncHandler(async (req, res) => {
   try {
     const { includeInactive = false } = req.query;
-    
+
     const bundles = await Product.getBundles({ includeInactive });
-    
+
     res.json({
       status: 'success',
       data: bundles
@@ -455,33 +454,33 @@ const getBundles = asyncHandler(async (req, res) => {
 const scanProductByBarcode = asyncHandler(async (req, res) => {
   try {
     const { barcode } = req.params;
-    
+
     if (!barcode) {
       return res.status(400).json({
         status: 'error',
         message: 'Barcode is required'
       });
     }
-    
-    const product = await Product.findOne({ 
+
+    const product = await Product.findOne({
       barcode: barcode,
-      isActive: true 
+      isActive: true
     })
       .populate('category', 'name code')
       .populate('subcategory', 'name code')
       .populate('vendor', 'name')
       .populate('parentProduct', 'name code bundle');
-    
+
     if (!product) {
       return res.status(404).json({
         status: 'error',
         message: 'Product not found with this barcode'
       });
     }
-    
+
     // Check stock availability
     const stockStatus = product.stockStatus;
-    
+
     res.json({
       status: 'success',
       data: {
@@ -504,29 +503,29 @@ const scanProductByBarcode = asyncHandler(async (req, res) => {
 // @access  Private
 const getComboEligibleProducts = asyncHandler(async (req, res) => {
   try {
-    const { 
-      priceRange, 
-      category, 
-      vendor, 
+    const {
+      priceRange,
+      category,
+      vendor,
       inStock = true,
       page = 1,
-      limit = 50 
+      limit = 50
     } = req.query;
-    
+
     let query = {
       isActive: true,
       isComboEligible: true
     };
-    
+
     if (category) query.category = category;
     if (vendor) query.vendor = vendor;
     if (inStock) query['inventory.currentStock'] = { $gt: 0 };
-    
+
     if (priceRange) {
       const [min, max] = priceRange.split('-').map(Number);
       query['pricing.offerPrice'] = { $gte: min, $lte: max };
     }
-    
+
     const products = await Product.find(query)
       .populate('category', 'name')
       .populate('subcategory', 'name')
@@ -535,9 +534,9 @@ const getComboEligibleProducts = asyncHandler(async (req, res) => {
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ 'pricing.offerPrice': 1 });
-    
+
     const total = await Product.countDocuments(query);
-    
+
     res.json({
       status: 'success',
       data: products,

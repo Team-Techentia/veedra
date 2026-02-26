@@ -111,33 +111,36 @@ const LoyaltyPointsPanel = () => {
             padding: 10px;
             margin: 0;
             max-width: 300px;
-            font-size: 14px;
-            line-height: 1.4;
+            font-size: 15px;
+            font-weight: bold;
+            line-height: 1.5;
+            color: #000;
           }
           .center {
             text-align: center;
           }
           .header {
-            font-size: 18px;
-            font-weight: bold;
+            font-size: 20px;
+            font-weight: 900;
             margin-bottom: 5px;
           }
           .subtitle {
-            font-size: 14px;
-            font-weight: bold;
+            font-size: 15px;
+            font-weight: 900;
             margin-bottom: 10px;
           }
           .line {
-            border-top: 1px dashed #000;
+            border-top: 2px dashed #000;
             margin: 10px 0;
           }
           .points {
-            font-size: 24px;
-            font-weight: bold;
+            font-size: 28px;
+            font-weight: 900;
             margin: 15px 0;
           }
           .footer {
-            font-size: 14px;
+            font-size: 15px;
+            font-weight: 900;
             margin-top: 10px;
           }
         </style>

@@ -1,0 +1,21 @@
+{
+    "watch": [
+        "src"
+    ],
+    "ext": "js,json",
+    "ignore": [
+        "src/logs/*",
+        "uploads/*",
+        "node_modules/*",
+        "*.test.js",
+        "*.spec.js",
+        "**/*.log"
+    ],
+    "delay": 500,
+    "env": {
+        "NODE_ENV": "development"
+    },
+    "signal": "SIGTERM",
+    "restartable": "rs",
+    "verbose": false
+}

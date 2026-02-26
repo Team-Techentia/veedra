@@ -5,19 +5,21 @@ const Wallet = require('../models/Wallet');
 const Combo = require('../models/Combo');
 
 // Helper function to apply automatic combos (price-range and quantity slab)
-const applyAutoCombos = async (items) => {
+const applyAutoCombos = async (items, productMap) => {
   try {
     // Fetch all active price-range combos and quantity slab combos
-    const priceRangeCombos = await Combo.getActivePriceRangeCombos();
-    const quantitySlabCombos = await Combo.getActiveQuantitySlabCombos();
+    const [priceRangeCombos, quantitySlabCombos] = await Promise.all([
+      Combo.getActivePriceRangeCombos(),
+      Combo.getActiveQuantitySlabCombos()
+    ]);
 
     if ((!priceRangeCombos || priceRangeCombos.length === 0) &&
       (!quantitySlabCombos || quantitySlabCombos.length === 0)) {
-      console.log('📊 No active auto-combos found');
+      // console.log('📊 No active auto-combos found');
       return items;
     }
 
-    console.log(`📊 Found ${priceRangeCombos.length} price-range combo(s) and ${quantitySlabCombos.length} quantity slab combo(s)`);
+    // console.log(`📊 Found ${priceRangeCombos.length} price-range combo(s) and ${quantitySlabCombos.length} quantity slab combo(s)`);
 
     let appliedCount = 0;
     let totalSavings = 0;
@@ -26,7 +28,9 @@ const applyAutoCombos = async (items) => {
     const priceGroups = {};
 
     for (const item of items) {
-      const product = await Product.findById(item.product || item._id);
+      const productId = (item.product || item._id).toString();
+      const product = productMap.get(productId);
+
       if (!product) continue;
 
       const productOfferPrice = product.pricing?.offerPrice || 0;
@@ -47,7 +51,7 @@ const applyAutoCombos = async (items) => {
       const offerPrice = parseFloat(priceKey);
       const totalQty = priceGroup.totalQuantity;
 
-      console.log(`🔍 Checking price group: ₹${offerPrice}, Total Qty: ${totalQty}`);
+      // console.log(`🔍 Checking price group: ₹${offerPrice}, Total Qty: ${totalQty}`);
 
       // Find matching quantity slab combo for this price range
       const matchingSlabCombo = quantitySlabCombos.find(combo => {
@@ -85,7 +89,7 @@ const applyAutoCombos = async (items) => {
           const originalPrice = offerPrice;
           const savings = originalPrice - slabPrice;
 
-          console.log(`  💰 QUANTITY SLAB MATCH: Qty ${totalQty} → ₹${slabPrice} (was ₹${originalPrice})`);
+          // console.log(`  💰 QUANTITY SLAB MATCH: Qty ${totalQty} → ₹${slabPrice} (was ₹${originalPrice})`);
 
           // Apply slab price to ALL items in this price group
           for (const { item, product } of priceGroup.items) {
@@ -117,16 +121,16 @@ const applyAutoCombos = async (items) => {
         for (const { item, product } of priceGroup.items) {
           const productOfferPrice = product.pricing?.offerPrice || 0;
 
-          console.log(`🔍 Checking product: ${product.name} - Offer Price: ₹${productOfferPrice}`);
+          // console.log(`🔍 Checking product: ${product.name} - Offer Price: ₹${productOfferPrice}`);
 
           // Find all combos that match this product's price
           const matchingCombos = priceRangeCombos.filter(combo => {
             const { minPrice, maxPrice } = combo.priceRangeConfig;
             const matches = productOfferPrice >= minPrice && productOfferPrice <= maxPrice;
 
-            if (matches) {
-              console.log(`  ✓ Matches "${combo.name}" (₹${minPrice}-₹${maxPrice} → ₹${combo.priceRangeConfig.comboPrice})`);
-            }
+            // if (matches) {
+            //   console.log(`  ✓ Matches "${combo.name}" (₹${minPrice}-₹${maxPrice} → ₹${combo.priceRangeConfig.comboPrice})`);
+            // }
 
             return matches;
           });
@@ -162,9 +166,9 @@ const applyAutoCombos = async (items) => {
             appliedCount++;
             totalSavings += savings * (item.quantity || 1);
 
-            console.log(`  💰 PRICE-RANGE AUTO-APPLIED: "${bestCombo.name}" - ₹${originalPrice} → ₹${comboPrice} (Save ₹${savings} each, Qty: ${item.quantity})`);
+            // console.log(`  💰 PRICE-RANGE AUTO-APPLIED: "${bestCombo.name}" - ₹${originalPrice} → ₹${comboPrice} (Save ₹${savings} each, Qty: ${item.quantity})`);
           } else {
-            console.log(`  ➖ No matching combo for this price (₹${productOfferPrice})`);
+            // console.log(`  ➖ No matching combo for this price (₹${productOfferPrice})`);
           }
         }
       }
@@ -173,7 +177,7 @@ const applyAutoCombos = async (items) => {
     if (appliedCount > 0) {
       console.log(`✅ Auto-Combos Applied: ${appliedCount} item(s), Total Savings: ₹${totalSavings.toFixed(2)}`);
     } else {
-      console.log('ℹ️  No auto-combos applied to cart items');
+      // console.log('ℹ️  No auto-combos applied to cart items');
     }
 
     return items;
@@ -186,7 +190,7 @@ const applyAutoCombos = async (items) => {
 
 // Create a new bill
 const createBill = asyncHandler(async (req, res) => {
-  console.log('📥 Received bill data:', JSON.stringify(req.body, null, 2));
+  // console.log('📥 Received bill data:', JSON.stringify(req.body, null, 2));
 
   const {
     customer,
@@ -205,9 +209,15 @@ const createBill = asyncHandler(async (req, res) => {
     });
   }
 
+  // OPTIMIZATION: Batch fetch all products once
+  const productIds = [...new Set(items.map(item => item.product || item._id))];
+  const products = await Product.find({ _id: { $in: productIds } });
+  const productMap = new Map(products.map(p => [p._id.toString(), p]));
+
   // ✅ STOCK VALIDATION - Check if all items have sufficient stock
   for (const item of items) {
-    const product = await Product.findById(item.product || item._id);
+    const productId = (item.product || item._id).toString();
+    const product = productMap.get(productId);
 
     if (!product) {
       return res.status(404).json({
@@ -228,8 +238,8 @@ const createBill = asyncHandler(async (req, res) => {
   }
 
   // 🎯 AUTO-APPLY COMBOS (price-range and quantity slabs)
-  console.log('🎯 Checking for auto-applicable combos...');
-  const itemsWithAutoCombos = await applyAutoCombos(items);
+  // console.log('🎯 Checking for auto-applicable combos...');
+  const itemsWithAutoCombos = await applyAutoCombos(items, productMap);
 
   // Generate bill number (YYYYMM00001)
   const today = new Date();
@@ -257,7 +267,7 @@ const createBill = asyncHandler(async (req, res) => {
 
   // Transform items to match schema (use items with auto-combos applied)
   const billItems = itemsWithAutoCombos.map(item => {
-    console.log('Processing item:', item);
+    // console.log('Processing item:', item);
 
     return {
       product: item.product || item._id,
@@ -275,7 +285,7 @@ const createBill = asyncHandler(async (req, res) => {
     };
   });
 
-  console.log('✅ Transformed bill items:', billItems);
+  // console.log('✅ Transformed bill items:', billItems);
 
   // Calculate totals safely
   const calculatedSubtotal = billItems.reduce((sum, item) => sum + (Number(item.totalAmount) || 0), 0);
@@ -284,13 +294,13 @@ const createBill = asyncHandler(async (req, res) => {
   const grandTotal = calculatedSubtotal - totalDiscount;
   const finalAmount = Number(totals?.finalAmount) || Number(payment?.amount) || grandTotal;
 
-  console.log('💰 Calculated totals:', {
-    calculatedSubtotal,
-    totalTax,
-    totalDiscount,
-    grandTotal,
-    finalAmount
-  });
+  // console.log('💰 Calculated totals:', {
+  //   calculatedSubtotal,
+  //   totalTax,
+  //   totalDiscount,
+  //   grandTotal,
+  //   finalAmount
+  // });
 
   // Determine payment status - map 'completed' to 'paid'
   let paymentStatus = payment?.status || 'paid';
@@ -330,46 +340,61 @@ const createBill = asyncHandler(async (req, res) => {
     }
   };
 
-  console.log('💾 Final bill data to save:', JSON.stringify(billData, null, 2));
+  // console.log('💾 Final bill data to save:', JSON.stringify(billData, null, 2));
 
   // Save bill to database
   const bill = await Billing.create(billData);
 
   console.log('✅ Bill saved successfully:', bill._id);
 
-  // ✅ REDUCE STOCK FOR ALL ITEMS
+  // ✅ OPTIMIZED STOCK REDUCTION using bulkWrite
   console.log('📦 Reducing stock for sold items...');
+  const bulkOperations = [];
+
   for (const item of billItems) {
-    try {
-      const product = await Product.findById(item.product);
+    const productId = item.product.toString();
+    const quantity = item.quantity;
+    const product = productMap.get(productId);
 
-      if (product) {
-        // Reduce product stock
-        const oldStock = product.inventory.currentStock;
-        product.inventory.currentStock = Math.max(0, oldStock - item.quantity);
-
-        // Update total sold
-        product.totalSold = (product.totalSold || 0) + item.quantity;
-
-        await product.save();
-
-        console.log(`✅ Stock reduced for ${product.name}: ${oldStock} → ${product.inventory.currentStock} (-${item.quantity})`);
-
-        // If product has parent (variant case), reduce parent stock too
-        if (product.parentProduct) {
-          const parentProduct = await Product.findById(product.parentProduct);
-          if (parentProduct) {
-            const oldParentStock = parentProduct.inventory.currentStock;
-            parentProduct.inventory.currentStock = Math.max(0, oldParentStock - item.quantity);
-            parentProduct.totalSold = (parentProduct.totalSold || 0) + item.quantity;
-            await parentProduct.save();
-            console.log(`✅ Parent stock reduced: ${oldParentStock} → ${parentProduct.inventory.currentStock} (-${item.quantity})`);
+    if (product) {
+      // 1. Reduce product stock
+      bulkOperations.push({
+        updateOne: {
+          filter: { _id: product._id },
+          update: {
+            $inc: {
+              'inventory.currentStock': -quantity,
+              totalSold: quantity
+            }
           }
         }
+      });
+
+      // 2. Reduce parent stock if applicable
+      if (product.parentProduct) {
+        bulkOperations.push({
+          updateOne: {
+            filter: { _id: product.parentProduct },
+            update: {
+              $inc: {
+                'inventory.currentStock': -quantity,
+                totalSold: quantity
+              }
+            }
+          }
+        });
       }
-    } catch (stockError) {
-      console.error(`⚠️ Failed to reduce stock for item ${item.productName}:`, stockError);
-      // Continue with other items even if one fails
+    }
+  }
+
+  if (bulkOperations.length > 0) {
+    try {
+      const result = await Product.bulkWrite(bulkOperations);
+      console.log(`✅ Stocks updated via bulkWrite. Matched: ${result.matchedCount}, Modified: ${result.modifiedCount}`);
+    } catch (error) {
+      console.error('⚠️ Failed to reduce stock via bulkWrite:', error);
+      // Fallback or critical error logging? For now, we log errors but don't fail the bill response to user to avoid "money taken but error shown" scenario.
+      // Ideally this should be a transaction.
     }
   }
 

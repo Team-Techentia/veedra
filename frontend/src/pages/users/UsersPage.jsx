@@ -82,7 +82,7 @@ const UsersPage = () => {
 
   const loadTopHolders = async () => {
     try {
-      const response = await getTopLoyaltyHolders(rankLimit);
+      const response = await getTopLoyaltyHolders(rankLimit, dateFrom || null, dateTo || null);
       setTopHolders(response.data || []);
     } catch (error) {
       console.error('Error loading top holders:', error);
@@ -377,29 +377,78 @@ const UsersPage = () => {
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="p-4 border-t border-gray-200 flex items-center justify-between">
-              <div className="text-sm text-gray-600">
-                Page {currentPage} of {totalPages}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+          <div className="p-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-gray-600">
+              Showing page <span className="font-medium">{currentPage}</span> of <span className="font-medium">{totalPages}</span>
+              &nbsp;({customers.length} records on this page)
             </div>
-          )}
+            <div className="flex items-center gap-1">
+              {/* Previous */}
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Prev
+              </button>
+
+              {/* Page number buttons */}
+              {(() => {
+                const pages = [];
+                const delta = 2; // pages to show on each side of current
+                const left = Math.max(1, currentPage - delta);
+                const right = Math.min(totalPages, currentPage + delta);
+
+                // First page + ellipsis
+                if (left > 1) {
+                  pages.push(
+                    <button key={1} onClick={() => setCurrentPage(1)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                      1
+                    </button>
+                  );
+                  if (left > 2) pages.push(<span key="left-ellipsis" className="px-1 text-gray-400 select-none">…</span>);
+                }
+
+                // Windowed pages
+                for (let p = left; p <= right; p++) {
+                  pages.push(
+                    <button key={p} onClick={() => setCurrentPage(p)}
+                      className={`px-3 py-1.5 text-sm rounded-lg border transition-colors font-medium ${p === currentPage
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : 'border-gray-300 hover:bg-gray-50'
+                        }`}>
+                      {p}
+                    </button>
+                  );
+                }
+
+                // Ellipsis + last page
+                if (right < totalPages) {
+                  if (right < totalPages - 1) pages.push(<span key="right-ellipsis" className="px-1 text-gray-400 select-none">…</span>);
+                  pages.push(
+                    <button key={totalPages} onClick={() => setCurrentPage(totalPages)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                      {totalPages}
+                    </button>
+                  );
+                }
+
+                return pages;
+              })()}
+
+              {/* Next */}
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -407,56 +456,54 @@ const UsersPage = () => {
       <div className="max-w-2xl mx-auto">
         <Card>
           <CardHeader>
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex-1">
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-yellow-600" />
-                  {(dateFrom || dateTo) ? (
-                    <span>
-                      Top {rankLimit} Loyalty Points Holders from {dateFrom ? new Date(dateFrom).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'beginning'} to {dateTo ? new Date(dateTo).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'now'}
-                    </span>
-                  ) : (
-                    <span>Top {rankLimit} Loyalty Points Holders</span>
-                  )}
-                </CardTitle>
+            {/* Line 1: Filters */}
+            <div className="flex flex-wrap gap-3 items-end justify-end mb-3">
+              {/* From Date */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">From Date</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                />
               </div>
-              <div className="flex gap-2 items-end">
-                {/* From Date */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">From Date</label>
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
-                  />
-                </div>
-                {/* To Date */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">To Date</label>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
-                  />
-                </div>
-                {/* Rank Filter */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Rank Filter</label>
-                  <select
-                    value={rankLimit}
-                    onChange={(e) => setRankLimit(Number(e.target.value))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
-                  >
-                    <option value={10}>Top 10</option>
-                    <option value={20}>Top 20</option>
-                    <option value={50}>Top 50</option>
-                    <option value={100}>Top 100</option>
-                  </select>
-                </div>
+              {/* To Date */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">To Date</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                />
+              </div>
+              {/* Rank Filter */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Rank Filter</label>
+                <select
+                  value={rankLimit}
+                  onChange={(e) => setRankLimit(Number(e.target.value))}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                >
+                  <option value={10}>Top 10</option>
+                  <option value={20}>Top 20</option>
+                  <option value={50}>Top 50</option>
+                  <option value={100}>Top 100</option>
+                </select>
               </div>
             </div>
+            {/* Line 2: Title */}
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-yellow-600" />
+              {(dateFrom || dateTo) ? (
+                <span>
+                  Top {rankLimit} Loyalty Points Holders from {dateFrom ? new Date(dateFrom).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'beginning'} to {dateTo ? new Date(dateTo).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'now'}
+                </span>
+              ) : (
+                <span>Top {rankLimit} Loyalty Points Holders</span>
+              )}
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">

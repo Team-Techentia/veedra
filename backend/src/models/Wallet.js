@@ -88,13 +88,46 @@ walletSchema.pre('save', function (next) {
 });
 
 // Static method: Get top loyalty points holders
-walletSchema.statics.getTopLoyaltyHolders = async function (limit = 50) {
+// When dateFrom/dateTo are provided, ranks by points EARNED in that period (not overall balance)
+walletSchema.statics.getTopLoyaltyHolders = async function (limit = 50, dateFrom = null, dateTo = null) {
     try {
-        return await this.find({})
-            .sort({ points: -1 })
-            .limit(limit)
-            .select('customerName phone place email points loyaltyStats createdAt')
+        if (!dateFrom && !dateTo) {
+            // No date filter — return top by current available balance
+            return await this.find({})
+                .sort({ points: -1 })
+                .limit(limit)
+                .select('customerName phone place email points loyaltyStats createdAt')
+                .lean();
+        }
+
+        // Date filter — compute points earned within the period per wallet
+        const from = dateFrom ? new Date(dateFrom) : null;
+        const to = dateTo ? new Date(dateTo) : null;
+        if (to) to.setHours(23, 59, 59, 999); // include entire end day
+
+        const wallets = await this.find({})
+            .select('customerName phone place email points loyaltyStats transactions createdAt')
             .lean();
+
+        const ranked = wallets.map(wallet => {
+            const periodEarned = (wallet.transactions || [])
+                .filter(txn => {
+                    if (txn.type !== 'earned') return false;
+                    const d = new Date(txn.date);
+                    if (from && d < from) return false;
+                    if (to && d > to) return false;
+                    return true;
+                })
+                .reduce((sum, txn) => sum + (txn.points || 0), 0);
+
+            return { ...wallet, periodEarned };
+        });
+
+        return ranked
+            .filter(w => w.periodEarned > 0)
+            .sort((a, b) => b.periodEarned - a.periodEarned)
+            .slice(0, limit)
+            .map(({ periodEarned, ...rest }) => ({ ...rest, points: periodEarned })); // expose period points as display value
     } catch (error) {
         console.error('Error fetching top loyalty holders:', error);
         throw error;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Loader2, AlertCircle } from 'lucide-react';
+import { Save, Loader2, AlertCircle, Plus, Trash2, X } from 'lucide-react';
 import walletService from '../../services/walletService';
 import toast from 'react-hot-toast';
 import axios from 'axios';
@@ -8,8 +8,12 @@ const WalletSettings = () => {
     const [rules, setRules] = useState([]);
     const [loading, setLoading] = useState(true);
     const [savingId, setSavingId] = useState(null);
+    const [deletingId, setDeletingId] = useState(null);
     const [pointConfig, setPointConfig] = useState(null);
     const [savingConfig, setSavingConfig] = useState(false);
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [newRule, setNewRule] = useState({ minAmount: '', maxAmount: '', points: '' });
+    const [creatingRule, setCreatingRule] = useState(false);
 
     useEffect(() => {
         fetchRules();
@@ -97,6 +101,58 @@ const WalletSettings = () => {
             console.error('Error updating config:', error);
         } finally {
             setSavingConfig(false);
+        }
+    };
+
+    const handleCreateRule = async () => {
+        if (!newRule.minAmount || !newRule.maxAmount || !newRule.points) {
+            toast.error('Please fill in all fields');
+            return;
+        }
+        if (parseInt(newRule.minAmount) >= parseInt(newRule.maxAmount)) {
+            toast.error('Min amount must be less than max amount');
+            return;
+        }
+        try {
+            setCreatingRule(true);
+            const token = localStorage.getItem('token');
+            await axios.post(
+                'https://api.techentia.in/api/point-rules',
+                {
+                    minAmount: parseInt(newRule.minAmount),
+                    maxAmount: parseInt(newRule.maxAmount),
+                    points: parseInt(newRule.points)
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            toast.success('New point rule slot created!');
+            setShowCreateModal(false);
+            setNewRule({ minAmount: '', maxAmount: '', points: '' });
+            fetchRules();
+        } catch (error) {
+            toast.error('Failed to create point rule');
+            console.error('Error creating rule:', error);
+        } finally {
+            setCreatingRule(false);
+        }
+    };
+
+    const handleDeleteRule = async (id) => {
+        if (!window.confirm('Are you sure you want to delete this slot?')) return;
+        try {
+            setDeletingId(id);
+            const token = localStorage.getItem('token');
+            await axios.delete(
+                `https://api.techentia.in/api/point-rules/${id}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            toast.success('Point rule deleted');
+            fetchRules();
+        } catch (error) {
+            toast.error('Failed to delete point rule');
+            console.error('Error deleting rule:', error);
+        } finally {
+            setDeletingId(null);
         }
     };
 
@@ -204,6 +260,17 @@ const WalletSettings = () => {
                 </p>
             </div>
 
+            {/* Create Slot Button */}
+            <div className="mb-4 flex justify-end">
+                <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="inline-flex items-center px-5 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all shadow-sm"
+                >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Slot
+                </button>
+            </div>
+
             {/* Table */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
@@ -220,7 +287,7 @@ const WalletSettings = () => {
                                     Points Earned
                                 </th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                    Action
+                                    Actions
                                 </th>
                             </tr>
                         </thead>
@@ -255,23 +322,36 @@ const WalletSettings = () => {
                                         />
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                                        <button
-                                            onClick={() => handleSave(rule)}
-                                            disabled={savingId === rule._id}
-                                            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                                        >
-                                            {savingId === rule._id ? (
-                                                <>
-                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                    Saving...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Save className="h-4 w-4 mr-2" />
-                                                    Save
-                                                </>
-                                            )}
-                                        </button>
+                                        <div className="flex items-center justify-end gap-2">
+                                            <button
+                                                onClick={() => handleSave(rule)}
+                                                disabled={savingId === rule._id}
+                                                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                            >
+                                                {savingId === rule._id ? (
+                                                    <>
+                                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                        Saving...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Save className="h-4 w-4 mr-2" />
+                                                        Save
+                                                    </>
+                                                )}
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteRule(rule._id)}
+                                                disabled={deletingId === rule._id}
+                                                className="inline-flex items-center px-3 py-2 bg-red-100 text-red-700 text-sm font-medium rounded-md hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                            >
+                                                {deletingId === rule._id ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <Trash2 className="h-4 w-4" />
+                                                )}
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -286,6 +366,85 @@ const WalletSettings = () => {
                     💡 <strong>Tip:</strong> Make sure there are no gaps between ranges to ensure all purchase amounts are covered.
                 </p>
             </div>
+
+            {/* Create Slot Modal */}
+            {showCreateModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+                        <div className="flex items-center justify-between mb-5">
+                            <h3 className="text-lg font-bold text-gray-900">Create New Slot</h3>
+                            <button
+                                onClick={() => { setShowCreateModal(false); setNewRule({ minAmount: '', maxAmount: '', points: '' }); }}
+                                className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Min Amount (₹)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={newRule.minAmount}
+                                    onChange={(e) => setNewRule({ ...newRule, minAmount: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="e.g. 0"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Max Amount (₹)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={newRule.maxAmount}
+                                    onChange={(e) => setNewRule({ ...newRule, maxAmount: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="e.g. 500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Points Earned</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={newRule.points}
+                                    onChange={(e) => setNewRule({ ...newRule, points: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="e.g. 10"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="mt-6 flex gap-3 justify-end">
+                            <button
+                                onClick={() => { setShowCreateModal(false); setNewRule({ minAmount: '', maxAmount: '', points: '' }); }}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleCreateRule}
+                                disabled={creatingRule}
+                                className="inline-flex items-center px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            >
+                                {creatingRule ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Creating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Plus className="h-4 w-4 mr-2" />
+                                        Create Slot
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

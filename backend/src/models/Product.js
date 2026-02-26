@@ -690,44 +690,63 @@ productSchema.methods.updateChildProducts = async function (updateFields = {}) {
   }
 
   const childProducts = await this.constructor.find({ parentProduct: this._id });
+  const bulkOperations = [];
 
   for (const child of childProducts) {
+    const updates = {};
     let hasChanges = false;
 
     // Update pricing if inherited
     if (child.childConfig?.inheritFromParent?.pricing && updateFields.pricing) {
-      child.pricing = { ...child.pricing, ...updateFields.pricing };
+      // Use toObject() to ensure we work with plain objects
+      const currentPricing = child.pricing ? (child.pricing.toObject ? child.pricing.toObject() : child.pricing) : {};
+      updates.pricing = { ...currentPricing, ...updateFields.pricing };
       hasChanges = true;
     }
 
     // Update specifications if inherited
     if (child.childConfig?.inheritFromParent?.specifications && updateFields.specifications) {
-      child.specifications = { ...child.specifications, ...updateFields.specifications };
+      const currentSpecs = child.specifications ? (child.specifications.toObject ? child.specifications.toObject() : child.specifications) : {};
+      updates.specifications = { ...currentSpecs, ...updateFields.specifications };
       hasChanges = true;
     }
 
     // Update GST if inherited
-    if (child.childConfig?.inheritFromParent?.gst && (updateFields.hsnCode || updateFields.gstRate)) {
-      if (updateFields.hsnCode) child.hsnCode = updateFields.hsnCode;
-      if (updateFields.gstRate) child.gstRate = updateFields.gstRate;
-      hasChanges = true;
+    if (child.childConfig?.inheritFromParent?.gst) {
+      if (updateFields.hsnCode) {
+        updates.hsnCode = updateFields.hsnCode;
+        hasChanges = true;
+      }
+      if (updateFields.gstRate) {
+        updates.gstRate = updateFields.gstRate;
+        hasChanges = true;
+      }
     }
 
     // Update category if inherited
     if (child.childConfig?.inheritFromParent?.category && updateFields.category) {
-      child.category = updateFields.category;
+      updates.category = updateFields.category;
       hasChanges = true;
     }
 
     // Update vendor if inherited
     if (child.childConfig?.inheritFromParent?.vendor && updateFields.vendor) {
-      child.vendor = updateFields.vendor;
+      updates.vendor = updateFields.vendor;
       hasChanges = true;
     }
 
     if (hasChanges) {
-      await child.save();
+      bulkOperations.push({
+        updateOne: {
+          filter: { _id: child._id },
+          update: { $set: updates }
+        }
+      });
     }
+  }
+
+  if (bulkOperations.length > 0) {
+    await this.constructor.bulkWrite(bulkOperations);
   }
 };
 

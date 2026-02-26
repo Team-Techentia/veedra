@@ -5,7 +5,11 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon --config nodemon.json src/server.js",
+    "start:pm2": "npx pm2 start ecosystem.config.js",
+    "stop:pm2": "npx pm2 stop veedra-backend",
+    "restart:pm2": "npx pm2 restart veedra-backend",
+    "logs:pm2": "npx pm2 logs veedra-backend",
     "seed": "node src/scripts/seedData.js",
     "test": "jest",
     "lint": "eslint src/",

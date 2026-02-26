@@ -320,9 +320,9 @@ const deleteCustomer = asyncHandler(async (req, res) => {
 // @route   GET /api/wallets/top-loyalty
 // @access  Private
 const getTopLoyaltyHolders = asyncHandler(async (req, res) => {
-  const { limit = 50 } = req.query;
+  const { limit = 50, dateFrom, dateTo } = req.query;
 
-  const topHolders = await Wallet.getTopLoyaltyHolders(parseInt(limit));
+  const topHolders = await Wallet.getTopLoyaltyHolders(parseInt(limit), dateFrom || null, dateTo || null);
 
   res.status(200).json({
     success: true,
